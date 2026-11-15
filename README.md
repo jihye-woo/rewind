@@ -22,6 +22,8 @@ ChatGPT(MCP) ──────┘
 | `scripts/build.mjs` | 화면과 서버를 각각 한 파일로 묶어 `dist/`에 만듭니다 |
 | `infra/` | Terraform. Lambda, DynamoDB, API Gateway, 인증서, Route 53 레코드 |
 | `test/` | 자동 테스트 |
+| `data/` | 프로토타입에서 내보낸 데이터 |
+| `HANDOFF.md` | 지금 상태, 남은 일, 정한 것과 이유 |
 
 ## 준비물
 
@@ -107,6 +109,13 @@ MCP 도구는 `add_items`와 `find_items` 둘뿐입니다. 수정·삭제 도구
 ## 데이터
 
 - 기록 화면 아래의 "전체 기록 백업 받기"로 항목과 세션 로그를 JSON으로 받습니다.
+- 백업 파일은 `scripts/import.mjs`로 되살립니다. 이미 있는 항목은 건너뜁니다.
+
+  ```bash
+  APP_KEY=<앱 키> node scripts/import.mjs https://<도메인> rewind-backup-2026-11-15.json
+  ```
+
+- `data/prototype-export.json`은 Claude 안의 프로토타입에서 쓰던 항목 6개와 세션 1회입니다. 첫 배포 뒤 위 명령으로 한 번 넣습니다.
 - Terraform 상태 파일(`infra/terraform.tfstate`)에는 접속 키가 들어 있습니다. `.gitignore`에 넣어 두었으니 저장소에 올리지 마세요. 여러 컴퓨터에서 배포하려면 S3 백엔드로 옮기면 됩니다.
 - 키를 바꾸려면 `terraform apply -replace=random_password.mcp_key`(또는 `app_key`)를 실행합니다. 앱 키를 바꾸면 각 기기에서 새 `app_url`로 한 번 다시 엽니다.
 - 테이블에는 삭제 보호가 걸려 있습니다. `terraform destroy`를 하려면 `main.tf`의 `deletion_protection_enabled`를 `false`로 바꿔 먼저 apply합니다.

@@ -6,7 +6,8 @@
  *   POST /api/add-items           항목 등록                 │ Authorization: Bearer <앱 키>
  *   PATCH/DELETE /api/items/{id}  학습 상태 변경, 삭제      │
  *   PUT  /api/sessions/{id}       세션 로그 저장            │
- *   GET  /api/export              전체 백업                 ┘
+ *   GET  /api/export              전체 백업                 │
+ *   POST /api/import              백업 되살리기             ┘
  *   POST /mcp/{MCP 키}            MCP 엔드포인트 (ChatGPT가 호출)
  */
 import { timingSafeEqual } from 'node:crypto';
@@ -94,6 +95,10 @@ export async function route(req, deps) {
 
       if (path === '/api/state' && method === 'GET') return json(200, await service.getState(store));
       if (path === '/api/export' && method === 'GET') return json(200, await service.exportAll(store));
+      if (path === '/api/import' && method === 'POST') {
+        const body = parseBody(req) || {};
+        return json(200, await service.importAll(store, body.data || body, { overwrite: body.overwrite === true }));
+      }
       if (path === '/api/add-items' && method === 'POST') {
         return json(200, await service.addItems(store, parseBody(req) || {}, deps.now ? deps.now() : Date.now()));
       }

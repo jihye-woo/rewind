@@ -114,6 +114,34 @@ export async function putSession(store, id, doc) {
   return clean;
 }
 
+/**
+ * 백업(/api/export 의 결과)이나 프로토타입에서 내보낸 데이터를 되살린다.
+ * 등록 내용은 add_items 와 같은 검사를 거치고, 처음 등록 시각·학습 상태·켜짐/꺼짐은 파일의 값을 그대로 쓴다.
+ * 이미 있는 항목은 건너뛴다. overwrite 가 true 면 파일의 값으로 덮어쓴다.
+ */
+export async function importAll(store, data, { overwrite = false } = {}) {
+  if (!data || typeof data !== 'object' || !Array.isArray(data.items)) throw new InputError('items 배열이 있는 백업 파일이 아닙니다.');
+  const out = { items: { imported: 0, skipped: 0, rejected: [] }, sessions: { imported: 0, rejected: [] } };
+  for (const raw of data.items.slice(0, 5000)) {
+    const src = raw && (raw.src || raw.source);
+    const n = Core.normalizePayload({ picked_by: 'user', items: [{ ...raw, source: src || undefined }] }, num(raw && raw.createdAt) || Date.now());
+    const item = n.items[0];
+    if (!item || !ITEM_ID.test(item.id)) { out.items.rejected.push(String((raw && raw.text) || '') + ': ' + (n.errors[0] || '읽을 수 없는 항목')); continue; }
+    if (!overwrite && await store.getItem(item.id)) { out.items.skipped++; continue; }
+    try { item.st = raw.st == null ? null : cleanSt(raw.st); }
+    catch (e) { out.items.rejected.push(item.text + ': ' + e.message); continue; }
+    item.off = !!raw.off; item.pending = !!raw.pending;
+    await store.putItem(item);
+    out.items.imported++;
+  }
+  for (const s of (Array.isArray(data.sessions) ? data.sessions : []).slice(0, 20000)) {
+    const id = s && (s.id || (num(s.startedAt) !== null ? 's' + s.startedAt : ''));
+    try { await putSession(store, String(id), s); out.sessions.imported++; }
+    catch (e) { out.sessions.rejected.push(String(id) + ': ' + e.message); }
+  }
+  return out;
+}
+
 export async function exportAll(store) {
   const [items, sessions] = await Promise.all([store.listItems(), store.listSessions(100000)]);
   return { exportedAt: new Date().toISOString(), items, sessions };

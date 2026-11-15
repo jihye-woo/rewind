@@ -59,3 +59,33 @@ test('putSession: 형식을 정리해 저장하고 최신순으로 돌려준다'
   assert.deepEqual(s[1].ev[1], { i: 'bubbly', t: 'meaning', at: 2, r: 1 });
   await assert.rejects(service.putSession(store, 'bad', { startedAt: 1 }), service.InputError);
 });
+
+test('importAll: 프로토타입에서 내보낸 데이터를 등록 시각·학습 상태·꺼짐 그대로 되살린다', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const data = JSON.parse(await readFile(new URL('../data/prototype-export.json', import.meta.url), 'utf8'));
+  const store = createMemoryStore();
+  let r = await service.importAll(store, data);
+  assert.deepEqual(r, { items: { imported: 6, skipped: 0, rejected: [] }, sessions: { imported: 1, rejected: [] } });
+  const items = await store.listItems(), by = Object.fromEntries(items.map((i) => [i.id, i]));
+  for (const src of data.items) {
+    const got = by[src.id];
+    for (const k of ['kind', 'text', 'meaning_ko', 'note', 'examples', 'synonyms', 'antonyms', 'wrong_meanings_ko', 'wrong_fills', 'priority', 'src', 'createdAt', 'st', 'off', 'pending']) {
+      assert.deepEqual(got[k], src[k], `${src.id}.${k}`);
+    }
+  }
+  assert.deepEqual(items.filter((i) => i.off).map((i) => i.id).sort(), ['barkeep', 'bubbly']);
+  assert.equal((await store.listSessions(10))[0].n, 8);
+
+  // 다시 넣으면 건너뛰고, 그 사이 쌓인 학습 상태를 덮어쓰지 않는다
+  await service.patchItem(store, 'gorgeous', { st: { ...by.gorgeous.st, seen: 9 } });
+  r = await service.importAll(store, data);
+  assert.deepEqual([r.items.imported, r.items.skipped], [0, 6]);
+  assert.equal((await store.getItem('gorgeous')).st.seen, 9);
+  r = await service.importAll(store, data, { overwrite: true });
+  assert.equal(r.items.imported, 6); assert.equal((await store.getItem('gorgeous')).st.seen, 2);
+
+  // 잘못된 항목은 그것만 거절한다
+  r = await service.importAll(createMemoryStore(), { items: [{ text: 'x' }, { text: 'ok', meaning_ko: '뜻', st: { h: -3 } }, { text: 'fine', meaning_ko: '뜻' }], sessions: [{ id: 'bad' }] });
+  assert.deepEqual([r.items.imported, r.items.rejected.length, r.sessions.rejected.length], [1, 2, 1]);
+  await assert.rejects(service.importAll(createMemoryStore(), { nope: 1 }), service.InputError);
+});

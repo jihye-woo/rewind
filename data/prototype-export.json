@@ -1,0 +1,425 @@
+{
+  "exportedAt": "2026-11-15T07:13:00.000Z",
+  "from": "claude.ai 프로토타입 (되감기 영어 복습)",
+  "items": [
+    {
+      "id": "a-cross-word",
+      "kind": "phrase",
+      "text": "a cross word",
+      "ipa": "",
+      "meaning_ko": "화난 말, 싫은 소리",
+      "note": "cross는 '화난, 언짢은'이라는 형용사. 주로 never have a cross word (for/with someone)처럼 부정문으로 써서 '싫은 소리 한마디 없다'는 뜻이 된다. 십자말풀이는 붙여 쓴 crossword.",
+      "examples": [
+        {
+          "en": "Never had [a cross word] for anyone.",
+          "ko": "누구에게도 싫은 소리 한마디 한 적이 없었다."
+        },
+        {
+          "en": "In ten years, we've never had [a cross word].",
+          "ko": "10년 동안 우리는 언성을 높인 적이 한 번도 없다."
+        },
+        {
+          "en": "She never said [a cross word] to the kids.",
+          "ko": "그녀는 아이들에게 화난 말을 한 번도 하지 않았다."
+        }
+      ],
+      "synonyms": [
+        {
+          "text": "a harsh word",
+          "note": "모진 말"
+        },
+        {
+          "text": "an angry word",
+          "note": "화가 담긴 말"
+        }
+      ],
+      "antonyms": [
+        {
+          "text": "a kind word",
+          "note": "다정한 말"
+        }
+      ],
+      "wrong_meanings_ko": [
+        "십자말풀이",
+        "엇갈린 말, 오해",
+        "욕설, 비속어"
+      ],
+      "wrong_fills": [
+        "a kind word",
+        "a good word",
+        "the last word"
+      ],
+      "priority": false,
+      "src": {
+        "text": "Kayla kept her head down, worked hard. Never had a cross word for anyone.",
+        "ko": "케일라는 나서지 않고 묵묵히 열심히 일했어. 누구에게도 싫은 소리 한마디 한 적이 없었지.",
+        "origin": ""
+      },
+      "createdAt": 1794719482480,
+      "st": null,
+      "off": false,
+      "pending": false
+    },
+    {
+      "id": "barkeep",
+      "kind": "word",
+      "text": "barkeep",
+      "ipa": "/ˈbɑːrkiːp/",
+      "meaning_ko": "바텐더, 술집 주인",
+      "note": "bartender보다 옛스럽고 장난스러운 느낌. 일부러 익살스럽게 부를 때 쓴다.",
+      "examples": [
+        {
+          "en": "Hey, [barkeep]! Another round!",
+          "ko": "이봐요, 바텐더! 한 잔씩 더요!"
+        },
+        {
+          "en": "The [barkeep] slid a glass across the counter.",
+          "ko": "바텐더가 잔을 카운터 너머로 밀어 주었다."
+        }
+      ],
+      "synonyms": [
+        {
+          "text": "bartender",
+          "note": "가장 일반적인 말"
+        }
+      ],
+      "antonyms": [],
+      "wrong_meanings_ko": [
+        "술집 단골손님",
+        "문지기, 경비원",
+        "술 도매상"
+      ],
+      "wrong_fills": [],
+      "priority": false,
+      "src": {
+        "text": "Barkeep, set this gorgeous couple up with some bubbly.",
+        "ko": "바텐더, 여기 근사한 두 사람한테 샴페인 한잔씩 부탁해요!",
+        "origin": ""
+      },
+      "createdAt": 1794717000000,
+      "st": {
+        "h": 1.0002888888888888,
+        "intro": 1794717544896,
+        "last": 1794717569856,
+        "recent": "1",
+        "right": 1,
+        "seen": 2,
+        "sq": 0,
+        "wrong": 0
+      },
+      "off": true,
+      "pending": false
+    },
+    {
+      "id": "bubbly",
+      "kind": "word",
+      "text": "bubbly",
+      "ipa": "/ˈbʌbli/",
+      "meaning_ko": "샴페인, 스파클링 와인",
+      "note": "형용사로는 '거품이 이는', 사람에게 쓰면 '밝고 활기찬'이라는 뜻.",
+      "examples": [
+        {
+          "en": "Let's have some [bubbly]!",
+          "ko": "샴페인 한잔하자!"
+        },
+        {
+          "en": "Pop the [bubbly]!",
+          "ko": "샴페인 터뜨리자!"
+        },
+        {
+          "en": "She has a [bubbly] personality.",
+          "ko": "그녀는 밝고 활기찬 성격이야."
+        }
+      ],
+      "synonyms": [
+        {
+          "text": "champagne",
+          "note": "가장 일반적인 말"
+        },
+        {
+          "text": "sparkling wine",
+          "note": "샴페인 지방 것이 아니어도 쓰는 말"
+        }
+      ],
+      "antonyms": [],
+      "wrong_meanings_ko": [
+        "맥주 거품",
+        "탄산음료",
+        "취한 상태"
+      ],
+      "wrong_fills": [],
+      "priority": true,
+      "src": {
+        "text": "Barkeep, set this gorgeous couple up with some bubbly.",
+        "ko": "바텐더, 여기 근사한 두 사람한테 샴페인 한잔씩 부탁해요!",
+        "origin": ""
+      },
+      "createdAt": 1794717000000,
+      "st": {
+        "h": 1.0002233101851852,
+        "intro": 1794717539545,
+        "last": 1794717558839,
+        "recent": "1",
+        "right": 1,
+        "seen": 2,
+        "sq": 0,
+        "wrong": 0
+      },
+      "off": true,
+      "pending": false
+    },
+    {
+      "id": "gorgeous",
+      "kind": "word",
+      "text": "gorgeous",
+      "ipa": "/ˈɡɔːrdʒəs/",
+      "meaning_ko": "아주 아름다운, 근사한",
+      "note": "beautiful, good-looking보다 감탄의 느낌이 강하다.",
+      "examples": [
+        {
+          "en": "You look [gorgeous] tonight!",
+          "ko": "오늘 밤 정말 멋지다!"
+        },
+        {
+          "en": "What a [gorgeous] couple!",
+          "ko": "정말 잘 어울리는 커플이네!"
+        },
+        {
+          "en": "That's a [gorgeous] view.",
+          "ko": "풍경이 정말 끝내준다."
+        }
+      ],
+      "synonyms": [
+        {
+          "text": "stunning",
+          "note": "눈을 뗄 수 없을 만큼"
+        },
+        {
+          "text": "lovely",
+          "note": "더 부드럽고 일상적"
+        }
+      ],
+      "antonyms": [
+        {
+          "text": "hideous",
+          "note": "보기 흉한"
+        },
+        {
+          "text": "plain",
+          "note": "수수한, 평범한"
+        }
+      ],
+      "wrong_meanings_ko": [
+        "아주 비싼, 호화로운",
+        "거대한, 웅장한",
+        "너그러운, 인심 좋은"
+      ],
+      "wrong_fills": [],
+      "priority": false,
+      "src": {
+        "text": "Barkeep, set this gorgeous couple up with some bubbly.",
+        "ko": "바텐더, 여기 근사한 두 사람한테 샴페인 한잔씩 부탁해요!",
+        "origin": ""
+      },
+      "createdAt": 1794717000000,
+      "st": {
+        "h": 1.000197037037037,
+        "intro": 1794717548316,
+        "last": 1794717565340,
+        "recent": "1",
+        "right": 1,
+        "seen": 2,
+        "sq": 0,
+        "wrong": 0
+      },
+      "off": false,
+      "pending": false
+    },
+    {
+      "id": "keep-one-s-head-down",
+      "kind": "phrase",
+      "text": "keep one's head down",
+      "ipa": "",
+      "meaning_ko": "나서지 않고 조용히 지내다, 묵묵히 제 할 일만 하다",
+      "note": "말썽이나 주목을 피하려고 눈에 띄지 않게 군다는 뜻. 일에만 집중한다는 뜻으로도 쓴다.",
+      "examples": [
+        {
+          "en": "Kayla kept her [head down], worked hard.",
+          "ko": "케일라는 나서지 않고 묵묵히 열심히 일했다."
+        },
+        {
+          "en": "Just keep your [head down] until this blows over.",
+          "ko": "이 일이 잠잠해질 때까지 조용히 지내."
+        },
+        {
+          "en": "He kept his [head down] and finished the report.",
+          "ko": "그는 묵묵히 보고서를 끝냈다."
+        }
+      ],
+      "synonyms": [
+        {
+          "text": "lie low",
+          "note": "숨어 지낸다는 느낌이 더 강함"
+        },
+        {
+          "text": "stay out of trouble",
+          "note": "말썽에 휘말리지 않다"
+        }
+      ],
+      "antonyms": [
+        {
+          "text": "stick one's neck out",
+          "note": "위험을 무릅쓰고 나서다"
+        },
+        {
+          "text": "make waves",
+          "note": "평지풍파를 일으키다"
+        }
+      ],
+      "wrong_meanings_ko": [
+        "고개 숙여 사과하다",
+        "기가 죽어 풀이 죽다",
+        "잠을 청하다"
+      ],
+      "wrong_fills": [
+        "chin up",
+        "head high",
+        "guard up"
+      ],
+      "priority": false,
+      "src": {
+        "text": "Kayla kept her head down, worked hard. Never had a cross word for anyone.",
+        "ko": "케일라는 나서지 않고 묵묵히 열심히 일했어. 누구에게도 싫은 소리 한마디 한 적이 없었지.",
+        "origin": ""
+      },
+      "createdAt": 1794719482480,
+      "st": null,
+      "off": false,
+      "pending": false
+    },
+    {
+      "id": "set-someone-up-with-something",
+      "kind": "phrase",
+      "text": "set someone up with something",
+      "ipa": "",
+      "meaning_ko": "누군가에게 ~을 마련해 주다",
+      "note": "set + 사람 + up with + 물건. 사람을 넣으면 '소개팅을 주선하다'는 뜻이 된다.",
+      "examples": [
+        {
+          "en": "Can you [set] me [up with] a drink?",
+          "ko": "술 한잔 마련해 줄 수 있어?"
+        },
+        {
+          "en": "I'll [set] you [up with] everything you need.",
+          "ko": "필요한 건 전부 준비해 줄게."
+        },
+        {
+          "en": "We can [set] you [up with] a new laptop.",
+          "ko": "새 노트북을 쓸 수 있게 준비해 드릴게요."
+        },
+        {
+          "en": "My friend [set] me [up with] her coworker.",
+          "ko": "친구가 자기 직장 동료를 소개해 줬어."
+        },
+        {
+          "en": "Can you [set] me [up with] access to the database?",
+          "ko": "데이터베이스에 접근할 수 있게 해 줄 수 있어?"
+        }
+      ],
+      "synonyms": [
+        {
+          "text": "provide someone with something",
+          "note": "더 격식 있는 말"
+        },
+        {
+          "text": "get someone something",
+          "note": "일상적이고 짧은 말"
+        }
+      ],
+      "antonyms": [],
+      "wrong_meanings_ko": [
+        "누군가를 ~로 속이다",
+        "누군가와 ~을 놓고 다투다",
+        "누군가에게 ~을 떠넘기다"
+      ],
+      "wrong_fills": [
+        "put … up with",
+        "set … off with",
+        "get … on with"
+      ],
+      "priority": true,
+      "src": {
+        "text": "Barkeep, set this gorgeous couple up with some bubbly.",
+        "ko": "바텐더, 여기 근사한 두 사람한테 샴페인 한잔씩 부탁해요!",
+        "origin": ""
+      },
+      "createdAt": 1794717000000,
+      "st": {
+        "h": 1.0001279861111112,
+        "intro": 1794717543030,
+        "last": 1794717554088,
+        "recent": "1",
+        "right": 1,
+        "seen": 2,
+        "sq": 0,
+        "wrong": 0
+      },
+      "off": false,
+      "pending": false
+    }
+  ],
+  "sessions": [
+    {
+      "id": "s1794717536455",
+      "startedAt": 1794717536455,
+      "endedAt": 1794717571664,
+      "n": 8,
+      "ev": [
+        {
+          "at": 1794717539545,
+          "i": "bubbly",
+          "t": "intro"
+        },
+        {
+          "at": 1794717543030,
+          "i": "set-someone-up-with-something",
+          "t": "intro"
+        },
+        {
+          "at": 1794717544896,
+          "i": "barkeep",
+          "t": "intro"
+        },
+        {
+          "at": 1794717548316,
+          "i": "gorgeous",
+          "t": "intro"
+        },
+        {
+          "at": 1794717554088,
+          "i": "set-someone-up-with-something",
+          "r": 1,
+          "t": "meaning"
+        },
+        {
+          "at": 1794717558839,
+          "i": "bubbly",
+          "r": 1,
+          "t": "meaning"
+        },
+        {
+          "at": 1794717565340,
+          "i": "gorgeous",
+          "r": 1,
+          "t": "meaning"
+        },
+        {
+          "at": 1794717569856,
+          "i": "barkeep",
+          "r": 1,
+          "t": "meaning"
+        }
+      ]
+    }
+  ]
+}
