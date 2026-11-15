@@ -1,0 +1,22 @@
+{
+  "name": "rewind",
+  "version": "1.0.0",
+  "private": true,
+  "description": "영어 단어·표현 복습 앱: PWA + 앱 API + MCP 서버 (AWS Lambda, DynamoDB)",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs && node server/local.mjs",
+    "test": "node scripts/build.mjs && node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.700.0",
+    "@aws-sdk/lib-dynamodb": "^3.700.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "dynalite": "^4.0.0",
+    "esbuild": "^0.28.0"
+  }
+}

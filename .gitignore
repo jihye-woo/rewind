@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.zip
+.DS_Store
+
+# Terraform: 상태 파일에는 접속 키가 들어 있으므로 올리지 않는다
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/terraform.tfvars
+infra/build/

@@ -1,0 +1,9 @@
+# 이 파일을 terraform.tfvars 로 복사한 뒤 값을 바꾼다. terraform.tfvars 는 git 에 올라가지 않는다.
+
+# 앱 주소로 쓸 도메인과, 그 도메인이 속한 Route 53 호스팅 영역
+domain_name = "rewind.example.com"
+zone_name   = "example.com"
+
+# 기본값을 바꾸고 싶을 때만
+# region = "ap-northeast-2"
+# name   = "rewind"
