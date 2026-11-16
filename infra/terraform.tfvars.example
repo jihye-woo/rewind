@@ -7,3 +7,10 @@ zone_name   = "example.com"
 # 기본값을 바꾸고 싶을 때만
 # region = "ap-northeast-2"
 # name   = "rewind"
+
+# 앱 접속 키를 직접 정하려면 (12자 이상, 영문·숫자·._~-). 비워 두면 무작위로 만든다.
+# 이 파일 대신 환경 변수로 넘겨도 된다: export TF_VAR_app_key='...'
+# app_key = ""
+
+# 키 없이도 읽기 전용으로 보여 줄지 (기본 true)
+# public_read = true

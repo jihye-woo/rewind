@@ -10,10 +10,13 @@
 locals {
   use_domain = var.domain_name != ""
   base_url   = local.use_domain ? "https://${var.domain_name}" : aws_apigatewayv2_api.this.api_endpoint
+  # 직접 정한 키가 있으면 그것을, 없으면 무작위 키를 쓴다
+  app_key = var.app_key != "" ? var.app_key : random_password.app_key.result
 }
 
 # ---------------------------------------------------------------------------
 # 접속 키. 앱용과 MCP용을 따로 둔다: MCP 주소가 새도 앱 API(조회·삭제)는 쓸 수 없다.
+# 앱 키는 var.app_key 로 직접 정할 수 있다. 정하지 않으면 아래 무작위 키를 쓴다.
 # 키를 바꾸려면: terraform apply -replace=random_password.mcp_key
 # ---------------------------------------------------------------------------
 resource "random_password" "app_key" {
@@ -116,9 +119,10 @@ resource "aws_lambda_function" "this" {
 
   environment {
     variables = {
-      TABLE_NAME = aws_dynamodb_table.this.name
-      APP_KEY    = random_password.app_key.result
-      MCP_KEY    = random_password.mcp_key.result
+      TABLE_NAME  = aws_dynamodb_table.this.name
+      APP_KEY     = local.app_key
+      MCP_KEY     = random_password.mcp_key.result
+      PUBLIC_READ = tostring(var.public_read)
     }
   }
 

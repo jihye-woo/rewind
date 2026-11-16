@@ -2,6 +2,7 @@
  * 로컬 실행용 서버. AWS 없이 메모리 저장소로 앱 전체를 띄운다.
  *   npm run dev   →  http://localhost:8787/#key=dev-app-key
  *   MCP 엔드포인트:  http://localhost:8787/mcp/dev-mcp-key
+ *   키 없이 열면 읽기 전용으로 보인다 (배포 기본값과 같음)
  * 서버를 끄면 데이터는 사라진다.
  */
 import http from 'node:http';
@@ -9,7 +10,7 @@ import { pathToFileURL } from 'node:url';
 import { route } from './http.mjs';
 import { createMemoryStore } from './store-memory.mjs';
 
-export async function startLocal({ port = 8787, store = createMemoryStore(), appKey = 'dev-app-key', mcpKey = 'dev-mcp-key', now } = {}) {
+export async function startLocal({ port = 8787, store = createMemoryStore(), appKey = 'dev-app-key', mcpKey = 'dev-mcp-key', publicRead = true, now } = {}) {
   const { assets } = await import('../dist/web-assets.mjs');
   const server = http.createServer(async (req, res) => {
     const chunks = [];
@@ -18,7 +19,7 @@ export async function startLocal({ port = 8787, store = createMemoryStore(), app
     const out = await route({
       method: req.method, path: url.pathname, headers: req.headers,
       body: chunks.length ? Buffer.concat(chunks).toString('utf8') : undefined,
-    }, { store, config: { appKey, mcpKey }, assets, now });
+    }, { store, config: { appKey, mcpKey, publicRead }, assets, now });
     res.writeHead(out.status, out.headers);
     res.end(out.base64 ? Buffer.from(out.body, 'base64') : out.body);
   });

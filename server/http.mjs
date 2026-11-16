@@ -2,7 +2,7 @@
  * HTTP 라우터. Lambda(handler.mjs)와 로컬 서버(local.mjs)가 같은 함수를 부른다.
  *
  *   GET  /                        앱 화면 (인증 없음. 화면 자체에는 데이터가 없다)
- *   GET  /api/state               항목 + 최근 세션          ┐
+ *   GET  /api/state               항목 + 최근 세션          ┐ (publicRead 이면 키 없이도 읽기 전용으로 허용)
  *   POST /api/add-items           항목 등록                 │ Authorization: Bearer <앱 키>
  *   PATCH/DELETE /api/items/{id}  학습 상태 변경, 삭제      │
  *   PUT  /api/sessions/{id}       세션 로그 저장            │
@@ -53,7 +53,7 @@ function parseBody(req) {
 
 /**
  * @param {{method: string, path: string, headers: Record<string,string>, body?: string}} req  headers의 키는 소문자
- * @param {{store: object, config: {appKey: string, mcpKey: string}, assets: object, now?: () => number}} deps
+ * @param {{store: object, config: {appKey: string, mcpKey: string, publicRead?: boolean}, assets: object, now?: () => number}} deps
  */
 export async function route(req, deps) {
   const { store, config, assets } = deps;
@@ -91,9 +91,13 @@ export async function route(req, deps) {
     // ---- 앱 API ----
     if (path.startsWith('/api/')) {
       const auth = req.headers.authorization || '';
+      // 키 없이 온 상태 조회는 publicRead 일 때 읽기 전용으로 답한다. 키를 보냈는데 틀리면 401 이다.
+      if (!auth && config.publicRead && path === '/api/state' && method === 'GET') {
+        return json(200, { ...(await service.getState(store)), readOnly: true });
+      }
       if (!auth.startsWith('Bearer ') || !sameSecret(auth.slice(7).trim(), config.appKey)) return json(401, { error: '접속 키가 없거나 올바르지 않습니다.' });
 
-      if (path === '/api/state' && method === 'GET') return json(200, await service.getState(store));
+      if (path === '/api/state' && method === 'GET') return json(200, { ...(await service.getState(store)), readOnly: false });
       if (path === '/api/export' && method === 'GET') return json(200, await service.exportAll(store));
       if (path === '/api/import' && method === 'POST') {
         const body = parseBody(req) || {};

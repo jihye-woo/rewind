@@ -70,3 +70,20 @@ test('MCP 엔드포인트: 키, 메서드, 버전 헤더, 알림', async () => {
   assert.equal(JSON.parse((await rpc({ jsonrpc: '2.0', id: 4, method: 'resources/list' })).body).error.code, -32601);
   assert.equal((await rpc([{ jsonrpc: '2.0', id: 5, method: 'ping' }])).status, 400, '묶음 요청은 받지 않는다');
 });
+
+test('publicRead: 키 없이는 상태 조회만 읽기 전용으로 되고, 쓰기·백업·틀린 키는 막힌다', async () => {
+  const deps = { ...mkDeps(), config: { ...config, publicRead: true } };
+  await call(deps, 'POST', '/api/add-items', { body: payload });
+  const ro = await call(deps, 'GET', '/api/state', { auth: false });
+  assert.equal(ro.status, 200);
+  const st = JSON.parse(ro.body);
+  assert.equal(st.readOnly, true); assert.equal(st.items.length, 1);
+  assert.equal(JSON.parse((await call(deps, 'GET', '/api/state')).body).readOnly, false, '키가 맞으면 쓰기 가능');
+  assert.equal((await call(deps, 'GET', '/api/state', { auth: false, headers: { authorization: 'Bearer wrong' } })).status, 401, '틀린 키는 읽기 전용으로 넘어가지 않는다');
+  assert.equal((await call(deps, 'GET', '/api/export', { auth: false })).status, 401);
+  assert.equal((await call(deps, 'POST', '/api/add-items', { auth: false, body: payload })).status, 401);
+  assert.equal((await call(deps, 'PATCH', '/api/items/bubbly', { auth: false, body: { off: true } })).status, 401);
+  assert.equal((await call(deps, 'DELETE', '/api/items/bubbly', { auth: false })).status, 401);
+  assert.equal((await call(deps, 'PUT', '/api/sessions/s1', { auth: false, body: { startedAt: 1, ev: [] } })).status, 401);
+  assert.equal((await call(deps, 'POST', '/api/import', { auth: false, body: { items: [] } })).status, 401);
+});

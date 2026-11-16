@@ -14,7 +14,7 @@ import EXAMPLE from './example.json';
   var S = {
     mode: 'loading', note: '', warn: '', view: 'study', items: [], byId: {}, sessions: [],
     sess: null, filter: 'all', detail: null, confirmDel: false, delAsk: null,
-    draftJson: '', preview: null, pick: {}, busy: false, flash: '', key: ''
+    draftJson: '', preview: null, pick: {}, busy: false, flash: '', key: '', ro: false
   };
 
   var GPT_PROMPT = [
@@ -92,7 +92,7 @@ import EXAMPLE from './example.json';
   async function api(method, path, body) {
     var res = await fetch(path, {
       method: method,
-      headers: Object.assign({ authorization: 'Bearer ' + S.key }, body === undefined ? {} : { 'content-type': 'application/json' }),
+      headers: Object.assign(S.key ? { authorization: 'Bearer ' + S.key } : {}, body === undefined ? {} : { 'content-type': 'application/json' }),
       body: body === undefined ? undefined : JSON.stringify(body)
     });
     if (res.status === 401) { var e = new Error('unauthorized'); e.code = 401; throw e; }
@@ -130,7 +130,7 @@ import EXAMPLE from './example.json';
 
   /** 학습 상태·켜짐/꺼짐만 바꾼다. 등록 내용은 서버의 add-items 만 바꾼다. */
   function setItemState(id, patch) {
-    var it = S.byId[id]; if (!it) return;
+    var it = S.byId[id]; if (!it || S.ro) return;
     var next = Object.assign({}, it, patch);
     S.items[S.items.indexOf(it)] = next; S.byId[id] = next;
     var merged = Object.assign({}, (latest['item:' + id] && latest['item:' + id].patch) || {}, patch);
@@ -139,10 +139,12 @@ import EXAMPLE from './example.json';
     qwrite('item:' + id, job);
   }
   function removeItem(id) {
+    if (S.ro) return;
     S.items = S.items.filter(function (x) { return x.id !== id; }); delete S.byId[id];
     qwrite('item:' + id, function () { return api('DELETE', '/api/items/' + encodeURIComponent(id)); });
   }
   function setSession(doc, id) {
+    if (S.ro) return;
     var i = S.sessions.findIndex(function (x) { return x.id === id; });
     var row = Object.assign({ id: id }, doc);
     if (i === -1) S.sessions.push(row); else S.sessions[i] = row;
@@ -152,9 +154,9 @@ import EXAMPLE from './example.json';
     try {
       var d = await api('GET', '/api/state');
       S.items = d.items || []; S.sessions = d.sessions || []; reindex();
-      S.mode = 'ready'; S.note = '';
+      S.ro = !!d.readOnly; S.mode = 'ready'; S.note = '';
     } catch (e) {
-      if (e.code === 401) S.mode = 'nokey';
+      if (e.code === 401) { S.mode = 'nokey'; if (S.key) S.flash = '저장된 접속 키가 맞지 않습니다. 키가 바뀌었다면 새 키를 넣어 주세요.'; }
       else { S.mode = S.mode === 'ready' ? 'ready' : 'error'; S.note = '서버에서 데이터를 불러오지 못했습니다. 연결을 확인한 뒤 다시 시도하세요.'; }
     }
     render();
@@ -166,8 +168,7 @@ import EXAMPLE from './example.json';
   }
   function init() {
     readKey(); route(); render();
-    if (!S.key) { S.mode = 'nokey'; render(); return; }
-    load();
+    load(); // 키가 없으면 서버가 허용하는 경우 읽기 전용으로, 아니면 키 입력 화면으로 간다
   }
 
   /* ---------- pieces ---------- */
@@ -248,11 +249,12 @@ import EXAMPLE from './example.json';
   function studyHome() {
     var now = Date.now(), st = C.computeStats(S.items, S.sessions, now);
     if (!S.items.length) {
+      if (S.ro) return '<div class="card empty"><p>아직 등록한 항목이 없습니다.</p></div>';
       return '<div class="card empty"><p>아직 등록한 항목이 없습니다.</p><p class="small">등록 화면에서 GPT가 정리한 JSON을 붙여 넣거나 예시를 불러오세요.</p>' +
         '<a class="btn primary" href="#add" style="text-decoration:none;display:inline-block">등록 화면으로</a></div>';
     }
     var quota = C.planNew(S.items, S.sessions, now).length;
-    var cand = st.by.pending ? '<div class="card ctl-card"><div><b>확인을 기다리는 후보 ' + st.by.pending + '개</b><div class="small">GPT가 문장에서 고른 항목입니다. 학습에 넣을 것을 골라 주세요.</div></div><button class="btn sm" data-act="go-pending">고르기</button></div>' : '';
+    var cand = st.by.pending && !S.ro ? '<div class="card ctl-card"><div><b>확인을 기다리는 후보 ' + st.by.pending + '개</b><div class="small">GPT가 문장에서 고른 항목입니다. 학습에 넣을 것을 골라 주세요.</div></div><button class="btn sm" data-act="go-pending">고르기</button></div>' : '';
     var latestSrc = null;
     S.items.filter(C.active).sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); }).some(function (i) { if (i.src && i.src.text) { latestSrc = i.src; return true; } return false; });
     var learnedN = st.by.learning + st.by.familiar, plan;
@@ -273,7 +275,8 @@ import EXAMPLE from './example.json';
       '<div class="tile"><b>' + st.streak + '</b><span>연속 학습 일수</span></div>' +
       '</div>' +
       '<div class="card"><h2>오늘의 세션</h2><p class="small">' + esc(plan) + '. 한 번에 항목 ' + (st.recent ? C.CFG.target + '~' + C.CFG.targetRecent : C.CFG.target) + '개 안팎입니다.</p>' +
-      '<button class="btn primary" data-act="start">세션 시작</button></div>';
+      (S.ro ? '<p class="small">읽기 전용으로 보는 중이라 세션을 시작할 수 없습니다.</p><button class="btn primary" data-act="key-open">접속 키 입력</button></div>'
+        : '<button class="btn primary" data-act="start">세션 시작</button></div>');
   }
 
   function sessionView() {
@@ -358,9 +361,9 @@ import EXAMPLE from './example.json';
       return '<button class="chip" data-act="filter" data-f="' + c[0] + '" aria-pressed="' + (f === c[0]) + '">' + c[1] + '</button>';
     }).join('') + '</div>';
     if (!list.length) return h + '<div class="card empty">' + (S.items.length ? '이 조건에 맞는 항목이 없습니다.' : '아직 등록한 항목이 없습니다.') + '</div>';
-    return h + '<div class="small">' + list.length + '개 · 스위치를 끄면 세션에 나오지 않고 기록은 남습니다</div><div class="list">' + list.map(function (i) {
+    return h + '<div class="small">' + list.length + '개' + (S.ro ? '' : ' · 스위치를 끄면 세션에 나오지 않고 기록은 남습니다') + '</div><div class="list">' + list.map(function (i) {
       var st = i.st || {}, sg = C.stage(i), id = esc(i.id), left = C.recentLeft(i, now);
-      var ctl = S.delAsk === i.id
+      var ctl = S.ro ? '' : S.delAsk === i.id
         ? '<span class="small">기록까지 삭제할까요?</span><button class="btn sm" data-act="row-del-cancel">취소</button><button class="btn sm danger" data-act="row-del-yes" data-id="' + id + '">삭제</button>'
         : (i.pending ? '<button class="btn sm primary" data-act="toggle" data-id="' + id + '">학습에 넣기</button>' : switchHtml(i)) + '<button class="btn sm quiet danger" data-act="row-del" data-id="' + id + '">삭제</button>';
       return '<div class="row item-row' + (i.off ? ' is-off' : '') + '"><button class="row-main" data-act="open" data-id="' + id + '"><div class="t"><b>' + esc(i.text) + '</b>' +
@@ -368,7 +371,7 @@ import EXAMPLE from './example.json';
         '<div class="m">' + esc(i.meaning_ko) + '</div><div class="s"><span>' + kindKo(i.kind) + '</span>' +
         (C.learned(i) ? '<span>본 ' + st.seen + '회</span><span>맞힘 ' + st.right + ' · 틀림 ' + st.wrong + '</span>' + dots(st) + (i.off ? '' : '<span>' + dueText(i, now) + '</span>') : '<span>아직 시작 전</span>') +
         (!i.off && left ? '<span class="tag">매 세션 노출 ' + left + '일 남음</span>' : '') +
-        '</div></button><div class="row-ctl">' + ctl + '</div></div>';
+        '</div></button>' + (ctl ? '<div class="row-ctl">' + ctl + '</div>' : '') + '</div>';
     }).join('') + '</div>';
   }
   function switchHtml(i) {
@@ -386,9 +389,9 @@ import EXAMPLE from './example.json';
       '<div class="tile"><b>' + (C.learned(it) ? (st.h < 1 ? '1일 미만' : Math.round(st.h) + '일') : '없음') + '</b><span>기억 반감기</span></div></div>' +
       (C.learned(it) ? '<div class="small">최근 퀴즈 ' + dots(st) + (it.off ? '' : ' · ' + dueText(it, now)) + ' · 처음 본 날 ' + fmtDay(st.intro || st.last) + '</div>' : '') +
       (!it.off && C.recentLeft(it, now) ? '<div class="small">최근 넣은 항목이라 앞으로 ' + C.recentLeft(it, now) + '일 동안 매 세션에 나옵니다.</div>' : '') +
-      '<div class="card ctl-card"><div><b>학습에 포함</b><div class="small">' + (it.pending ? 'GPT가 고른 후보입니다. 켜면 학습에 들어가고, 필요 없으면 삭제하세요.' : '끄면 세션에 나오지 않습니다. 기록은 남고, 다시 켜면 이어서 학습합니다.') + '</div></div>' + switchHtml(it) + '</div>' +
+      (S.ro ? '' : '<div class="card ctl-card"><div><b>학습에 포함</b><div class="small">' + (it.pending ? 'GPT가 고른 후보입니다. 켜면 학습에 들어가고, 필요 없으면 삭제하세요.' : '끄면 세션에 나오지 않습니다. 기록은 남고, 다시 켜면 이어서 학습합니다.') + '</div></div>' + switchHtml(it) + '</div>' +
       (S.confirmDel ? '<div class="row2"><button class="btn" data-act="del-cancel">취소</button><button class="btn danger" data-act="del-yes">기록까지 삭제</button></div>'
-        : '<button class="btn danger" data-act="del" style="align-self:flex-start">이 항목 삭제</button>');
+        : '<button class="btn danger" data-act="del" style="align-self:flex-start">이 항목 삭제</button>'));
   }
 
   /* ---------- add ---------- */
@@ -472,16 +475,16 @@ import EXAMPLE from './example.json';
       var q = 0, r = 0; s.ev.forEach(function (e) { if ((e.r === 1 || e.r === 0) && !e.x) { q++; r += e.r; } });
       return '<div class="row"><div class="t"><span>' + fmtTime(s.startedAt) + '</span><span class="s">카드 ' + s.ev.length + '장 · 퀴즈 ' + (q ? r + '/' + q : '없음') + '</span></div></div>';
     }).join('') + '</div>' : '<div class="card empty">아직 마친 세션이 없습니다.</div>';
-    h += '<button class="btn" data-act="backup" style="align-self:flex-start">전체 기록 백업 받기 (JSON)</button>';
+    if (!S.ro) h += '<button class="btn" data-act="backup" style="align-self:flex-start">전체 기록 백업 받기 (JSON)</button>';
     return h;
   }
 
   /* ---------- 접속 키 ---------- */
   function keyView() {
-    return '<div class="card"><h2>접속 키를 입력하세요</h2><p class="small">이 앱은 한 사람만 쓰도록 접속 키로 보호되어 있습니다. 배포할 때 받은 앱 주소(…/#key=…)로 열거나, 그 키를 아래에 붙여 넣으세요. 키는 이 브라우저에만 저장됩니다.</p>' +
+    return '<div class="card"><h2>접속 키를 입력하세요</h2><p class="small">등록, 학습, 끄기, 삭제, 백업은 접속 키가 있어야 합니다. 배포할 때 정한 키를 붙여 넣거나 앱 주소(…/#key=…)로 여세요. 키는 이 브라우저에만 저장됩니다.</p>' +
       '<label class="small" for="key-input">접속 키</label><input id="key-input" class="key-input" type="password" autocomplete="off" spellcheck="false">' +
       (S.flash ? '<div class="msgs"><div class="e">' + esc(S.flash) + '</div></div>' : '') +
-      '<button class="btn primary" data-act="key-save">확인</button></div>';
+      '<div class="row2"><button class="btn" data-act="key-cancel">읽기 전용으로 보기</button><button class="btn primary" data-act="key-save">확인</button></div></div>';
   }
 
   /* ---------- render & events ---------- */
@@ -491,12 +494,14 @@ import EXAMPLE from './example.json';
     var m = $('#main'), h = '';
     if (S.note) h += '<div class="notice">' + esc(S.note) + '</div>';
     h += '<div class="notice warn" id="warn"' + (S.warn ? '' : ' hidden') + '>' + esc(S.warn) + '</div>';
+    var addLink = document.querySelector('.nav a[href="#add"]'); if (addLink) addLink.hidden = S.ro && S.mode === 'ready';
+    if (S.ro && S.mode === 'ready') h += '<div class="notice ro-bar"><span>읽기 전용으로 보는 중입니다.</span> <button class="btn sm" data-act="key-open">접속 키 입력</button></div>';
     if (S.mode === 'loading') h += '<div class="card empty">불러오는 중…</div>';
     else if (S.mode === 'nokey') h += keyView();
     else if (S.mode === 'error') h += '<button class="btn primary" data-act="reload">다시 시도</button>';
     else if (S.view === 'study') h += S.sess ? sessionView() : studyHome();
     else if (S.view === 'items') h += itemsView();
-    else if (S.view === 'add') h += addView();
+    else if (S.view === 'add') h += S.ro ? '<div class="card empty"><p>등록은 접속 키가 있어야 합니다.</p></div>' : addView();
     else h += statsView();
     m.innerHTML = h;
   }
@@ -507,7 +512,14 @@ import EXAMPLE from './example.json';
   }
 
   var ACT = {
-    start: function () { startSession(); },
+    start: function () { if (!S.ro) startSession(); },
+    'key-open': function () { S.flash = ''; S.mode = 'nokey'; render(); var el = $('#key-input'); if (el) el.focus(); },
+    'key-cancel': function () {
+      // 저장된 키를 지우고 키 없이 다시 읽는다. 서버가 읽기 전용을 막아 두었으면 다시 이 화면으로 온다.
+      S.key = ''; try { localStorage.removeItem(KEY_LS); } catch (e) { /* 무시 */ }
+      S.mode = 'loading'; render();
+      load().then(function () { if (S.mode === 'nokey') { S.flash = '이 서버는 읽기 전용 보기를 허용하지 않습니다.'; render(); } });
+    },
     flip: function () { S.sess.phase = 'back'; render(); },
     'intro-next': function () { record('intro'); advance(); },
     seen: function (el) { var v = el.getAttribute('data-v'); record(v === 'ok' ? 'seen_ok' : 'seen_new', { v: v }); advance(); },
@@ -539,7 +551,7 @@ import EXAMPLE from './example.json';
       S.key = v; S.flash = ''; S.mode = 'loading'; render();
       api('GET', '/api/state').then(function (d) {
         try { localStorage.setItem(KEY_LS, v); } catch (e) { /* 이번 방문에만 쓴다 */ }
-        S.items = d.items || []; S.sessions = d.sessions || []; reindex(); S.mode = 'ready'; render();
+        S.items = d.items || []; S.sessions = d.sessions || []; reindex(); S.ro = !!d.readOnly; S.mode = 'ready'; render();
       }, function (e) { S.mode = 'nokey'; S.flash = e.code === 401 ? '키가 맞지 않습니다.' : '서버에 연결하지 못했습니다.'; render(); });
     },
     backup: function (el) {

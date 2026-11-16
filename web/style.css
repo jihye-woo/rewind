@@ -42,6 +42,8 @@ p{margin:0}
 main{display:flex;flex-direction:column;gap:16px;padding-top:18px}
 .notice{font-size:13.5px;padding:9px 12px;border:1px solid var(--line);border-left:4px solid var(--accent);background:var(--card);border-radius:6px}
 .notice.warn{border-left-color:var(--bad)}
+.notice.ro-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.nav a[hidden]{display:none}
 
 /* caption bar: the original line, as a subtitle */
 .caption{background:var(--caption);color:var(--caption-ink);border-radius:10px;padding:18px 18px 16px;display:flex;flex-direction:column;gap:8px}

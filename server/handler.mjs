@@ -1,13 +1,13 @@
 /**
  * Lambda 진입점. API Gateway(HTTP API, payload 2.0)가 보내는 이벤트를 라우터가 읽는 모양으로 바꾼다.
- * 환경 변수: TABLE_NAME, APP_KEY, MCP_KEY (Terraform이 넣어 준다)
+ * 환경 변수: TABLE_NAME, APP_KEY, MCP_KEY, PUBLIC_READ (Terraform이 넣어 준다)
  */
 import { route } from './http.mjs';
 import { createDynamoStore } from './store-dynamo.mjs';
 import { assets } from '../dist/web-assets.mjs';
 
 const store = createDynamoStore({ tableName: process.env.TABLE_NAME });
-const config = { appKey: process.env.APP_KEY, mcpKey: process.env.MCP_KEY };
+const config = { appKey: process.env.APP_KEY, mcpKey: process.env.MCP_KEY, publicRead: process.env.PUBLIC_READ === 'true' };
 
 export async function handler(event) {
   const body = event.body == null ? undefined

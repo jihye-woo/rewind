@@ -56,6 +56,7 @@ npm run build
 cd infra
 cp terraform.tfvars.example terraform.tfvars
 #    terraform.tfvars 를 열어 domain_name 과 zone_name 을 내 도메인으로 바꿉니다
+#    앱 접속 키를 직접 정하려면 app_key 도 적습니다 (아래 "접속 키와 읽기 전용 보기")
 
 # 3) 배포. 인증서 발급과 DNS 확인 때문에 처음에는 몇 분 걸립니다
 terraform init
@@ -70,6 +71,13 @@ terraform output -raw mcp_url    # ChatGPT 에 등록할 주소
 
 코드를 고친 뒤에는 `npm run build`와 `terraform apply`를 다시 실행합니다.
 
+### 접속 키와 읽기 전용 보기
+
+- **앱 키를 직접 정하기**: `terraform.tfvars`에 `app_key = "..."`를 적거나, 파일에 남기기 싫으면 `export TF_VAR_app_key='...'`로 넘긴 뒤 `terraform apply` 합니다. 12자 이상, 영문·숫자·`. _ ~ -`만 됩니다. 비워 두면 Terraform이 40자 무작위 키를 만듭니다.
+- **키 없이 보기**: 기본값(`public_read = true`)이면 키 없이 `https://<도메인>`을 열었을 때 항목, 통계, 세션 기록을 읽기 전용으로 보여 줍니다. 등록, 학습 세션, 끄기·켜기, 삭제, 백업은 키가 있어야 합니다. 화면 위의 "접속 키 입력"으로 키를 넣으면 바로 쓰기 모드가 됩니다.
+- 읽기 전용 보기는 주소를 아는 누구나 등록한 항목과 학습 기록을 볼 수 있다는 뜻입니다. 막으려면 `public_read = false`로 바꿔 apply 합니다.
+- 브라우저에 저장된 키가 틀리면(키를 바꾼 경우) 화면이 새 키를 물어보고, "읽기 전용으로 보기"를 누르면 저장된 키를 지웁니다.
+
 ### 만들어지는 것
 
 | 리소스 | 설정 | 이유 |
@@ -78,7 +86,7 @@ terraform output -raw mcp_url    # ChatGPT 에 등록할 주소
 | Lambda | Node.js 22, arm64, 256MB, 제한 시간 10초 | 화면·API·MCP를 한 함수가 처리합니다 |
 | API Gateway (HTTP API) | 모든 경로를 Lambda로, 초당 10건 제한 | 도메인을 붙이려면 Lambda 앞에 필요합니다. 요청 제한은 주소가 알려졌을 때의 비용 상한입니다 |
 | ACM 인증서, Route 53 레코드 | DNS 확인 방식 | `domain_name`을 비워 두면 만들지 않고 API Gateway 기본 주소를 씁니다 |
-| 접속 키 2개 | 앱용, MCP용 | MCP 주소가 새도 앱 API(조회·삭제)는 쓸 수 없습니다 |
+| 접속 키 2개 | 앱용(직접 정할 수 있음), MCP용 | MCP 주소가 새도 앱 API(쓰기·삭제·백업)는 쓸 수 없습니다 |
 
 비용은 Lambda와 DynamoDB가 상시 무료 한도 안이고, API Gateway는 요청 100만 건당 1달러 안팎이라 혼자 쓰는 양으로는 월 몇 원 수준입니다. Route 53 호스팅 영역 요금은 이미 내고 계신 그대로입니다. 금액은 배포 전에 AWS 요금 페이지에서 한 번 확인하세요.
 
@@ -117,7 +125,7 @@ MCP 도구는 `add_items`와 `find_items` 둘뿐입니다. 수정·삭제 도구
 
 - `data/prototype-export.json`은 Claude 안의 프로토타입에서 쓰던 항목 6개와 세션 1회입니다. 첫 배포 뒤 위 명령으로 한 번 넣습니다.
 - Terraform 상태 파일(`infra/terraform.tfstate`)에는 접속 키가 들어 있습니다. `.gitignore`에 넣어 두었으니 저장소에 올리지 마세요. 여러 컴퓨터에서 배포하려면 S3 백엔드로 옮기면 됩니다.
-- 키를 바꾸려면 `terraform apply -replace=random_password.mcp_key`(또는 `app_key`)를 실행합니다. 앱 키를 바꾸면 각 기기에서 새 `app_url`로 한 번 다시 엽니다.
+- MCP 키를 바꾸려면 `terraform apply -replace=random_password.mcp_key`를 실행합니다. 앱 키는 `app_key` 값을 바꿔 apply 하거나, 직접 정하지 않았다면 `-replace=random_password.app_key`로 바꿉니다. 앱 키를 바꾸면 각 기기에서 새 키를 한 번 넣습니다.
 - 테이블에는 삭제 보호가 걸려 있습니다. `terraform destroy`를 하려면 `main.tf`의 `deletion_protection_enabled`를 `false`로 바꿔 먼저 apply합니다.
 
 ## Node.js가 처음이라면
