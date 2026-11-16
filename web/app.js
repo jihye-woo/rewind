@@ -133,7 +133,7 @@ import EXAMPLE from './example.json';
 
   /** 학습 상태·켜짐/꺼짐만 바꾼다. 등록 내용은 서버의 add-items 만 바꾼다. */
   function setItemState(id, patch) {
-    var it = S.byId[id]; if (!it || S.ro) return;
+    var it = S.byId[id]; if (!it) return; // 읽기 전용이면 화면에서만 바뀌고 qwrite 가 서버로 보내지 않는다
     var next = Object.assign({}, it, patch);
     S.items[S.items.indexOf(it)] = next; S.byId[id] = next;
     var merged = Object.assign({}, (latest['item:' + id] && latest['item:' + id].patch) || {}, patch);
@@ -147,7 +147,6 @@ import EXAMPLE from './example.json';
     qwrite('item:' + id, function () { return api('DELETE', 'api/items/' + encodeURIComponent(id)); });
   }
   function setSession(doc, id) {
-    if (S.ro) return;
     var i = S.sessions.findIndex(function (x) { return x.id === id; });
     var row = Object.assign({ id: id }, doc);
     if (i === -1) S.sessions.push(row); else S.sessions[i] = row;
@@ -286,7 +285,7 @@ import EXAMPLE from './example.json';
       '<div class="tile"><b>' + st.streak + '</b><span>연속 학습 일수</span></div>' +
       '</div>' +
       '<div class="card"><h2>오늘의 세션</h2><p class="small">' + esc(plan) + '. 한 번에 항목 ' + (st.recent ? C.CFG.target + '~' + C.CFG.targetRecent : C.CFG.target) + '개 안팎입니다.</p>' +
-      (S.ro ? '<p class="small">읽기 전용으로 보는 중이라 세션을 시작할 수 없습니다.</p><button class="btn primary" data-act="key-open">초대 코드 입력</button></div>'
+      (S.ro ? '<p class="small">읽기 전용이라 <b>체험 세션</b>으로 진행합니다. 풀어 볼 수 있지만 결과는 학습 기록에 남지 않고, 세션을 닫으면 원래 상태로 돌아갑니다.</p><button class="btn primary" data-act="start">체험 세션 시작</button></div>'
         : '<button class="btn primary" data-act="start">세션 시작</button></div>');
   }
 
@@ -295,7 +294,7 @@ import EXAMPLE from './example.json';
     if (s.done) return summaryView();
     var c = s.cards[s.idx], it = S.byId[c.id], q = s.cur, back = s.phase === 'back', h = '';
     h += '<div class="progress"><span>' + (s.idx + 1) + ' / ' + s.cards.length + '</span><div class="bar"><i style="width:' + Math.round(s.idx / s.cards.length * 100) + '%"></i></div>' +
-      '<button class="btn quiet" data-act="quit">그만하기</button></div>';
+      (S.ro ? '<span class="pill">체험 · 기록 안 됨</span>' : '') + '<button class="btn quiet" data-act="quit">그만하기</button></div>';
     var k = kindKo(it.kind);
     if (q.type === 'intro') {
       h += captionHtml(it.src, '이 장면에서 나온 말');
@@ -348,12 +347,13 @@ import EXAMPLE from './example.json';
     s.ev.forEach(function (e) { if ((e.r === 1 || e.r === 0) && !e.x) { q++; r += e.r; if (!e.r) wrong[e.i] = 1; } });
     function names(ids) { return ids.map(function (id) { return S.byId[id] ? '<span class="w en" style="font-size:16px">' + esc(S.byId[id].text) + '</span>' : ''; }).filter(Boolean).join(' · '); }
     var started = s.newIds.filter(function (id) { return S.byId[id] && C.learned(S.byId[id]); });
-    return '<div class="card"><h2>세션을 마쳤습니다</h2>' +
+    return '<div class="card"><h2>' + (S.ro ? '체험 세션을 마쳤습니다' : '세션을 마쳤습니다') + '</h2>' +
+      (S.ro ? '<p class="small">읽기 전용이라 이 결과는 학습 기록에 남지 않았습니다. "처음 화면으로"를 누르면 원래 상태로 돌아갑니다.</p>' : '') +
       '<div class="tiles"><div class="tile"><b>' + s.ev.length + '</b><span>본 카드</span></div>' +
       '<div class="tile"><b>' + (q ? r + ' / ' + q : '없음') + '</b><span>퀴즈 정답</span></div>' +
       '<div class="tile"><b>' + started.length + '</b><span>새로 시작한 항목</span></div></div>' +
       (started.length ? '<div><div class="sec">새로 시작</div>' + names(started) + '</div>' : '') +
-      (Object.keys(wrong).length ? '<div><div class="sec">틀린 항목 · 다음 세션에 먼저 나옵니다</div>' + names(Object.keys(wrong)) + '</div>' : '') +
+      (Object.keys(wrong).length ? '<div><div class="sec">틀린 항목' + (S.ro ? '' : ' · 다음 세션에 먼저 나옵니다') + '</div>' + names(Object.keys(wrong)) + '</div>' : '') +
       '</div><div class="row2"><button class="btn" data-act="close-sess">처음 화면으로</button><button class="btn primary" data-act="start" data-primary>한 세션 더</button></div>';
   }
 
@@ -612,7 +612,7 @@ import EXAMPLE from './example.json';
   }
 
   var ACT = {
-    start: function () { if (!S.ro) startSession(); },
+    start: function () { startSession(); },
     'key-open': function () { S.flash = ''; S.mode = 'nokey'; render(); var el = $('#key-input'); if (el) el.focus(); },
     'key-cancel': function () {
       // 저장된 키를 지우고 키 없이 다시 읽는다. 서버가 읽기 전용을 막아 두었으면 다시 이 화면으로 온다.
@@ -631,7 +631,11 @@ import EXAMPLE from './example.json';
     },
     next: function () { advance(); },
     quit: function () { finish(); render(); },
-    'close-sess': function () { S.sess = null; render(); },
+    'close-sess': function () {
+      S.sess = null;
+      if (S.ro) { load(); return; } // 체험 세션: 화면에서 바뀐 진도·세션을 버리고 서버의 상태로 되돌린다
+      render();
+    },
     filter: function (el) { S.filter = el.getAttribute('data-f'); S.delAsk = null; render(); },
     open: function (el) { S.detail = el.getAttribute('data-id'); S.confirmDel = false; render(); window.scrollTo(0, 0); },
     'open-from-stats': function (el) { S.detail = el.getAttribute('data-id'); location.hash = '#items'; if (S.view === 'items') render(); },
