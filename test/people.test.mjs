@@ -27,6 +27,12 @@ test('화면은 서비스 경로를 base 로 쓴다', async () => {
   const page = await route({ method: 'GET', path: '/', headers: {} }, mkDeps());
   assert.match(page.body, /<base href="\/english\/">/);
   assert.match(page.headers['content-security-policy'], /base-uri 'self'/);
+  assert.equal(page.headers['x-robots-tag'], 'noindex, nofollow');
+  assert.match(page.body, /<meta name="robots" content="noindex, nofollow">/);
+  const deps = mkDeps();
+  for (const p of ['/icon-192.png', '/manifest.webmanifest', '/api/state', '/api/me', '/nope']) {
+    assert.equal((await route({ method: 'GET', path: p, headers: {} }, deps)).headers['x-robots-tag'], 'noindex, nofollow', p);
+  }
 });
 
 test('손님은 주인의 화면을 읽기만 한다', async () => {

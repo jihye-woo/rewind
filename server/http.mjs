@@ -33,6 +33,7 @@ const MAX_UA = 200;
 const SECURITY = {
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'no-referrer',
+  'x-robots-tag': 'noindex, nofollow', // 검색엔진에 싣지 않는다 (화면 HTML 의 meta robots 와 같은 뜻)
 };
 const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'";
 
