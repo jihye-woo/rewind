@@ -14,7 +14,7 @@ import EXAMPLE from './example.json';
   var S = {
     mode: 'loading', note: '', warn: '', view: 'study', items: [], byId: {}, sessions: [],
     sess: null, filter: 'all', detail: null, confirmDel: false, delAsk: null,
-    draftJson: '', preview: null, pick: {}, busy: false, flash: '', key: '', ro: false
+    draftJson: '', preview: null, pick: {}, busy: false, flash: '', key: '', ro: false, me: { role: 'guest', name: '' }, traffic: null, trafficMsg: '', people: null, peopleMsg: '', invite: null, mcpPath: '', revokeAsk: null
   };
 
   var GPT_PROMPT = [
@@ -104,7 +104,9 @@ import EXAMPLE from './example.json';
 
   // 쓰기 대기열. 같은 대상에 대한 쓰기는 마지막 것만 남기고, 한 번에 하나씩 보낸다.
   var queue = [], latest = {}, pumping = false;
+  function isGuest() { return S.ro; } // 손님 = 읽기 전용 (서버가 readOnly 로 알려 준다)
   function qwrite(key, job) {
+    if (isGuest()) return; // 손님: 화면에서만 바뀌고 저장하지 않는다
     if (!(key in latest)) queue.push(key);
     latest[key] = job;
     if (!pumping) pump();
@@ -117,7 +119,8 @@ import EXAMPLE from './example.json';
       for (;;) {
         try { await job(); break; }
         catch (err) {
-          if (err.code === 401) { S.mode = 'nokey'; render(); break; }
+          if (err.code === 401) { S.mode = 'nokey'; S.flash = '접속이 끊겼습니다. 새 초대 코드를 받아 입력하세요.'; render(); break; }
+          if (err.code === 403) { S.warn = err.message; showWarn(); break; }
           if (!err.code && tries < 1) { tries++; await sleep(1500); continue; } // 네트워크 오류는 한 번 더
           S.warn = '저장하지 못했습니다. 연결을 확인한 뒤 화면을 새로 고치면 마지막으로 저장된 상태부터 이어집니다.';
           showWarn(); break;
@@ -134,29 +137,30 @@ import EXAMPLE from './example.json';
     var next = Object.assign({}, it, patch);
     S.items[S.items.indexOf(it)] = next; S.byId[id] = next;
     var merged = Object.assign({}, (latest['item:' + id] && latest['item:' + id].patch) || {}, patch);
-    var job = function () { return api('PATCH', '/api/items/' + encodeURIComponent(id), merged); };
+    var job = function () { return api('PATCH', 'api/items/' + encodeURIComponent(id), merged); };
     job.patch = merged;
     qwrite('item:' + id, job);
   }
   function removeItem(id) {
     if (S.ro) return;
     S.items = S.items.filter(function (x) { return x.id !== id; }); delete S.byId[id];
-    qwrite('item:' + id, function () { return api('DELETE', '/api/items/' + encodeURIComponent(id)); });
+    qwrite('item:' + id, function () { return api('DELETE', 'api/items/' + encodeURIComponent(id)); });
   }
   function setSession(doc, id) {
     if (S.ro) return;
     var i = S.sessions.findIndex(function (x) { return x.id === id; });
     var row = Object.assign({ id: id }, doc);
     if (i === -1) S.sessions.push(row); else S.sessions[i] = row;
-    qwrite('sess:' + id, function () { return api('PUT', '/api/sessions/' + encodeURIComponent(id), doc); });
+    qwrite('sess:' + id, function () { return api('PUT', 'api/sessions/' + encodeURIComponent(id), doc); });
   }
   async function load() {
     try {
-      var d = await api('GET', '/api/state');
+      var both = await Promise.all([api('GET', 'api/me'), api('GET', 'api/state')]), d = both[1];
+      S.me = both[0];
       S.items = d.items || []; S.sessions = d.sessions || []; reindex();
       S.ro = !!d.readOnly; S.mode = 'ready'; S.note = '';
     } catch (e) {
-      if (e.code === 401) { S.mode = 'nokey'; if (S.key) S.flash = '저장된 접속 키가 맞지 않습니다. 키가 바뀌었다면 새 키를 넣어 주세요.'; }
+      if (e.code === 401) { S.mode = 'nokey'; if (S.key) S.flash = '저장된 열쇠가 더 이상 맞지 않습니다. 새 초대 코드를 넣거나 읽기 전용으로 보세요.'; }
       else { S.mode = S.mode === 'ready' ? 'ready' : 'error'; S.note = '서버에서 데이터를 불러오지 못했습니다. 연결을 확인한 뒤 다시 시도하세요.'; }
     }
     render();
@@ -167,8 +171,15 @@ import EXAMPLE from './example.json';
     load();
   }
   function init() {
+    // /english 로 열렸으면 /english/ 로 바꿔 둔다. 그래야 #study 같은 링크가 페이지를 다시 불러오지 않는다
+    var bp = new URL(document.baseURI).pathname;
+    if (location.pathname + '/' === bp) history.replaceState(null, '', bp + location.search + location.hash);
     readKey(); route(); render();
-    load(); // 키가 없으면 서버가 허용하는 경우 읽기 전용으로, 아니면 키 입력 화면으로 간다
+    load(); // 열쇠가 없으면 손님(보기 전용)으로 연다
+  }
+  function saveKey(v) {
+    S.key = v;
+    try { if (v) localStorage.setItem(KEY_LS, v); else localStorage.removeItem(KEY_LS); } catch (e) { /* 이번 방문에만 쓴다 */ }
   }
 
   /* ---------- pieces ---------- */
@@ -275,7 +286,7 @@ import EXAMPLE from './example.json';
       '<div class="tile"><b>' + st.streak + '</b><span>연속 학습 일수</span></div>' +
       '</div>' +
       '<div class="card"><h2>오늘의 세션</h2><p class="small">' + esc(plan) + '. 한 번에 항목 ' + (st.recent ? C.CFG.target + '~' + C.CFG.targetRecent : C.CFG.target) + '개 안팎입니다.</p>' +
-      (S.ro ? '<p class="small">읽기 전용으로 보는 중이라 세션을 시작할 수 없습니다.</p><button class="btn primary" data-act="key-open">접속 키 입력</button></div>'
+      (S.ro ? '<p class="small">읽기 전용으로 보는 중이라 세션을 시작할 수 없습니다.</p><button class="btn primary" data-act="key-open">초대 코드 입력</button></div>'
         : '<button class="btn primary" data-act="start">세션 시작</button></div>');
   }
 
@@ -438,7 +449,7 @@ import EXAMPLE from './example.json';
     };
     S.busy = true; S.flash = ''; render();
     try {
-      var r = await api('POST', '/api/add-items', payload);
+      var r = await api('POST', 'api/add-items', payload);
       (r.items || []).forEach(function (it) {
         var k = S.items.findIndex(function (x) { return x.id === it.id; });
         if (k === -1) S.items.push(it); else S.items[k] = it;
@@ -475,14 +486,103 @@ import EXAMPLE from './example.json';
       var q = 0, r = 0; s.ev.forEach(function (e) { if ((e.r === 1 || e.r === 0) && !e.x) { q++; r += e.r; } });
       return '<div class="row"><div class="t"><span>' + fmtTime(s.startedAt) + '</span><span class="s">카드 ' + s.ev.length + '장 · 퀴즈 ' + (q ? r + '/' + q : '없음') + '</span></div></div>';
     }).join('') + '</div>' : '<div class="card empty">아직 마친 세션이 없습니다.</div>';
-    if (!S.ro) h += '<button class="btn" data-act="backup" style="align-self:flex-start">전체 기록 백업 받기 (JSON)</button>';
+    if (!isGuest()) h += '<button class="btn" data-act="backup" style="align-self:flex-start">전체 기록 백업 받기 (JSON)</button>';
+    h += peopleView();
+    if (S.me.role === 'owner') h += trafficView();
+    return h;
+  }
+
+  /* ---------- 사람·초대·ChatGPT 연결 ---------- */
+  function peopleView() {
+    if (isGuest()) return '';
+    var owner = S.me.role === 'owner', h = '<div class="sec">' + (owner ? '사람과 기기' : '내 기기와 ChatGPT') + '</div><div class="card">';
+    h += '<div class="small">' + (owner ? '친구를 초대하면 같은 단어장을 같이 쓰고, 학습 진도는 사람마다 따로 쌓입니다. 친구도 등록·삭제를 할 수 있습니다.' :
+      esc(S.me.name) + ' 님으로 접속했습니다. 단어장은 같이 쓰고 학습 진도는 따로 쌓입니다.') + '</div>';
+    if (owner) {
+      h += '<label class="small" for="invite-name">초대할 친구 이름</label><input id="invite-name" class="key-input" maxlength="30" autocomplete="off">' +
+        '<div class="row2"><button class="btn" data-act="invite-self">내 새 기기용 코드</button><button class="btn primary" data-act="invite-friend">친구 초대 코드 만들기</button></div>';
+    } else {
+      h += '<button class="btn" data-act="invite-self" style="align-self:flex-start">내 새 기기용 코드 만들기</button>';
+    }
+    if (S.invite) {
+      h += '<div class="notice"><b>' + esc(S.invite.self ? '내 새 기기용' : S.invite.name + ' 님 초대') + '</b> 코드: <b style="font-family:var(--font-line);font-size:20px;letter-spacing:.12em">' +
+        esc(S.invite.code.slice(0, 4) + '-' + S.invite.code.slice(4)) + '</b><div class="small">' + fmtTime(S.invite.expiresAt) + '까지 한 번만 쓸 수 있습니다. 이 앱 주소(' + esc(new URL(document.baseURI).href) + ')를 열고 "초대 코드 입력"에 넣으면 됩니다. 이 코드는 지금만 보입니다.</div></div>';
+    }
+    if (S.peopleMsg) h += '<div class="msgs"><div class="e">' + esc(S.peopleMsg) + '</div></div>';
+    h += '<div class="small"><b>내 ChatGPT 연결 주소</b> · 이 주소로 ChatGPT에 커넥터를 등록하면 GPT가 단어를 등록하고, 검색 결과에 내 진도가 보입니다. 새로 만들면 예전 주소는 바로 못 쓰게 됩니다.</div>';
+    h += S.mcpPath ? '<div class="notice" style="overflow-wrap:anywhere">' + esc(new URL(S.mcpPath, document.baseURI).href) + '<div class="small">이 주소는 지금만 보입니다. 다른 사람에게 보내지 마세요.</div></div>' : '';
+    h += '<button class="btn sm" data-act="mcp-new" style="align-self:flex-start">' + (S.mcpPath ? '다시 만들기' : '연결 주소 만들기') + '</button></div>';
+    if (owner) {
+      var p = S.people;
+      if (!p) h += '<button class="btn sm" data-act="people-load" style="align-self:flex-start">초대한 사람 보기</button>';
+      else {
+        h += '<div class="sec">초대한 사람</div>' + (p.users.length ? '<div class="list">' + p.users.map(function (u) {
+          var ctl = u.revokedAt ? '<span class="pill">끊김 · ' + fmtTime(u.revokedAt) + '</span>'
+            : S.revokeAsk === u.uid ? '<span class="small">접속을 끊을까요? 학습 기록은 남습니다.</span><button class="btn sm" data-act="revoke-cancel">취소</button><button class="btn sm danger" data-act="revoke-yes" data-uid="' + esc(u.uid) + '">끊기</button>'
+            : '<button class="btn sm" data-act="revoke" data-uid="' + esc(u.uid) + '">접속 끊기</button>';
+          return '<div class="row"><div class="t"><b>' + esc(u.name) + '</b><span class="s">' + ctl + '</span></div><div class="s"><span>' + fmtTime(u.createdAt) + ' 가입' + (u.mcp ? ' · ChatGPT 연결함' : '') + '</span></div></div>';
+        }).join('') + '</div>' : '<div class="card empty">아직 초대한 사람이 없습니다.</div>');
+        if (p.invites.length) {
+          h += '<div class="sec">최근 초대 코드 · 30일</div><div class="list">' + p.invites.map(function (i) {
+            var st = i.usedAt ? '썼음 · ' + fmtTime(i.usedAt) : i.expiresAt < Date.now() ? '기한 지남' : '기다리는 중 · ' + fmtTime(i.expiresAt) + '까지';
+            return '<div class="row"><div class="t"><span>' + esc(i.self ? '내 새 기기' : i.name) + '</span><span class="s">' + esc(st) + '</span></div></div>';
+          }).join('') + '</div>';
+        }
+        h += '<button class="btn sm" data-act="people-load" style="align-self:flex-start">새로 고침</button>';
+      }
+    }
+    return h;
+  }
+  function peopleAct(promise, ok) {
+    S.peopleMsg = '';
+    promise.then(function (r) { ok(r); render(); }, function (e) {
+      if (e.code === 401) { S.mode = 'nokey'; render(); return; }
+      S.peopleMsg = e.code ? e.message : '서버에 연결하지 못했습니다. 다시 눌러 주세요.'; render();
+    });
+  }
+
+  /* ---------- 접속 기록 ---------- */
+  function trafficView() {
+    var h = '<div class="sec">접속 기록 · IP별, 최근 90일</div>', t = S.traffic;
+    if (!t) {
+      return h + '<div class="card"><div class="small">어느 IP에서 언제 접속했는지 봅니다. 앱 키나 MCP 키를 처음 쓴 지 7일이 안 된 IP는 따로 표시합니다.' +
+        (S.trafficMsg ? ' ' + esc(S.trafficMsg) : '') + '</div><button class="btn sm" data-act="traffic-load" style="align-self:flex-start">접속 기록 보기</button></div>';
+    }
+    if (!t.enabled) return h + '<div class="card empty">이 서버에서는 접속 기록을 남기지 않습니다.</div>';
+    var now = Date.now(), week = now - 7 * DAY;
+    var keyed = t.visits.filter(function (v) { return v.n_app || v.n_mcp; });
+    var outside = t.visits.filter(function (v) { return !v.n_app && !v.n_mcp; }); // 손님(보기 전용)과 키가 틀린 접속
+    var newApp = keyed.filter(function (v) { return v.firstKey_app > week; });
+    var outsideWeek = outside.filter(function (v) { return v.lastSeen > week; });
+    h += '<div class="tiles">' +
+      '<div class="tile"><b>' + newApp.length + '</b><span>최근 7일 처음 열쇠를 쓴 IP</span></div>' +
+      '<div class="tile"><b>' + keyed.length + '</b><span>키를 쓴 IP (90일)</span></div>' +
+      '<div class="tile"><b>' + outsideWeek.length + '</b><span>최근 7일 초대 없이 온 IP</span></div></div>';
+    h += '<div class="small">지금 이 기기의 IP: <b>' + esc(t.you || '알 수 없음') + '</b>. 모르는 IP가 친구 이름으로 접속했다면 그 사람의 접속을 끊고 새로 초대하세요. 이름 없이 앱 키로 접속했다면 앱 키를 바꾸세요(README의 "데이터" 절). ChatGPT 서버는 IP가 자주 바뀌므로 MCP 키만 쓴 IP는 주의 표시를 하지 않습니다.</div>';
+    function row(v) {
+      var pills = '';
+      if (v.who) pills += '<span class="pill">' + esc(v.who) + '</span>';
+      if (v.ip === t.you) pills += '<span class="pill">지금 이 기기</span>';
+      if (v.firstKey_app > week) pills += '<span class="pill alert">새 IP · 앱 키</span>';
+      if (v.firstKey_mcp > week && !v.n_app) pills += '<span class="pill">MCP</span>';
+      var n = [['앱', v.n_app], ['MCP', v.n_mcp], ['화면', v.n_page], ['보기 전용', v.n_guest], ['거절', v.n_denied], ['없는 경로', v.n_other]]
+        .filter(function (x) { return x[1]; }).map(function (x) { return x[0] + ' ' + x[1]; }).join(' · ');
+      return '<div class="row"><div class="t"><b>' + esc(v.ip) + '</b><span class="s">' + pills + '</span></div>' +
+        '<div class="s"><span>' + esc(n) + '</span><span>처음 ' + fmtTime(v.firstSeen) + ' · 마지막 ' + fmtTime(v.lastSeen) + '</span></div>' +
+        (v.lastPath ? '<div class="m">마지막 경로: ' + esc(v.lastPath) + '</div>' : '') +
+        (v.ua ? '<div class="m">' + esc(v.ua) + '</div>' : '') + '</div>';
+    }
+    h += '<div class="sec">열쇠를 쓴 IP (나와 초대한 사람)</div>' + (keyed.length ? '<div class="list">' + keyed.map(row).join('') + '</div>' : '<div class="card empty">없습니다.</div>');
+    h += '<div class="sec">초대 없이 온 IP (보기 전용·거절) · 최근 ' + Math.min(outside.length, 30) + '곳</div>' +
+      (outside.length ? '<div class="list">' + outside.slice(0, 30).map(row).join('') + '</div>' : '<div class="card empty">없습니다.</div>');
+    h += '<button class="btn sm" data-act="traffic-load" style="align-self:flex-start">새로 고침</button>';
     return h;
   }
 
   /* ---------- 접속 키 ---------- */
   function keyView() {
-    return '<div class="card"><h2>접속 키를 입력하세요</h2><p class="small">등록, 학습, 끄기, 삭제, 백업은 접속 키가 있어야 합니다. 배포할 때 정한 키를 붙여 넣거나 앱 주소(…/#key=…)로 여세요. 키는 이 브라우저에만 저장됩니다.</p>' +
-      '<label class="small" for="key-input">접속 키</label><input id="key-input" class="key-input" type="password" autocomplete="off" spellcheck="false">' +
+    return '<div class="card"><h2>초대 코드를 입력하세요</h2><p class="small">초대받은 사람은 단어장을 같이 쓰고, 학습 진도는 따로 쌓입니다. 받은 8자리 코드를 넣으면 이 기기에 열쇠가 저장됩니다. 접속 키가 있으면 그것을 넣어도 됩니다.</p>' +
+      '<label class="small" for="key-input">초대 코드 또는 접속 키</label><input id="key-input" class="key-input" autocomplete="off" spellcheck="false" autocapitalize="characters">' +
       (S.flash ? '<div class="msgs"><div class="e">' + esc(S.flash) + '</div></div>' : '') +
       '<div class="row2"><button class="btn" data-act="key-cancel">읽기 전용으로 보기</button><button class="btn primary" data-act="key-save">확인</button></div></div>';
   }
@@ -495,13 +595,13 @@ import EXAMPLE from './example.json';
     if (S.note) h += '<div class="notice">' + esc(S.note) + '</div>';
     h += '<div class="notice warn" id="warn"' + (S.warn ? '' : ' hidden') + '>' + esc(S.warn) + '</div>';
     var addLink = document.querySelector('.nav a[href="#add"]'); if (addLink) addLink.hidden = S.ro && S.mode === 'ready';
-    if (S.ro && S.mode === 'ready') h += '<div class="notice ro-bar"><span>읽기 전용으로 보는 중입니다.</span> <button class="btn sm" data-act="key-open">접속 키 입력</button></div>';
+    if (S.ro && S.mode === 'ready') h += '<div class="notice ro-bar"><span>읽기 전용으로 보는 중입니다. 초대받으면 같이 쓸 수 있습니다.</span> <button class="btn sm" data-act="key-open">초대 코드 입력</button></div>';
     if (S.mode === 'loading') h += '<div class="card empty">불러오는 중…</div>';
     else if (S.mode === 'nokey') h += keyView();
     else if (S.mode === 'error') h += '<button class="btn primary" data-act="reload">다시 시도</button>';
     else if (S.view === 'study') h += S.sess ? sessionView() : studyHome();
     else if (S.view === 'items') h += itemsView();
-    else if (S.view === 'add') h += S.ro ? '<div class="card empty"><p>등록은 접속 키가 있어야 합니다.</p></div>' : addView();
+    else if (S.view === 'add') h += S.ro ? '<div class="card empty"><p>등록은 초대받은 사람만 할 수 있습니다.</p></div>' : addView();
     else h += statsView();
     m.innerHTML = h;
   }
@@ -547,20 +647,47 @@ import EXAMPLE from './example.json';
     reload: function () { S.mode = 'loading'; S.note = ''; render(); load(); },
     'key-save': function () {
       var v = ($('#key-input').value || '').trim().replace(/^.*key=/, '');
-      if (!v) { S.flash = '키를 입력하세요.'; render(); return; }
-      S.key = v; S.flash = ''; S.mode = 'loading'; render();
-      api('GET', '/api/state').then(function (d) {
-        try { localStorage.setItem(KEY_LS, v); } catch (e) { /* 이번 방문에만 쓴다 */ }
-        S.items = d.items || []; S.sessions = d.sessions || []; reindex(); S.ro = !!d.readOnly; S.mode = 'ready'; render();
-      }, function (e) { S.mode = 'nokey'; S.flash = e.code === 401 ? '키가 맞지 않습니다.' : '서버에 연결하지 못했습니다.'; render(); });
+      if (!v) { S.flash = '초대 코드나 키를 입력하세요.'; render(); return; }
+      var code = v.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      S.flash = ''; S.mode = 'loading'; render();
+      var fail = function (msg) { saveKey(''); S.mode = 'nokey'; S.flash = msg; render(); };
+      if (code.length === 8 && v.length <= 12) { // 초대 코드
+        saveKey('');
+        api('POST', 'api/invites/redeem', { code: code }).then(function (r) { saveKey(r.token); S.flash = ''; load(); },
+          function (e) { fail(e.code ? e.message : '서버에 연결하지 못했습니다.'); });
+        return;
+      }
+      saveKey(v);
+      api('GET', 'api/me').then(function () { S.flash = ''; load(); },
+        function (e) { fail(e.code === 401 ? '키가 맞지 않습니다.' : '서버에 연결하지 못했습니다.'); });
     },
     backup: function (el) {
-      api('GET', '/api/export').then(function (d) {
+      api('GET', 'api/export').then(function (d) {
         var a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' }));
         a.download = 'rewind-backup-' + C.dayKey(Date.now()) + '.json'; a.click();
         setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
       }, function () { el.textContent = '백업을 받지 못했습니다. 다시 눌러 주세요'; });
+    },
+    'invite-friend': function () {
+      var name = ($('#invite-name').value || '').trim();
+      if (!name) { S.peopleMsg = '초대할 친구 이름을 넣으세요.'; render(); return; }
+      peopleAct(api('POST', 'api/invites', { name: name }), function (r) { S.invite = r; S.people = null; });
+    },
+    'invite-self': function () { peopleAct(api('POST', 'api/invites', { self: true }), function (r) { S.invite = r; S.people = null; }); },
+    'mcp-new': function () { peopleAct(api('POST', 'api/me/mcp'), function (r) { S.mcpPath = r.path; }); },
+    'people-load': function () { peopleAct(api('GET', 'api/people'), function (r) { S.people = r; }); },
+    revoke: function (el) { S.revokeAsk = el.getAttribute('data-uid'); render(); },
+    'revoke-cancel': function () { S.revokeAsk = null; render(); },
+    'revoke-yes': function (el) {
+      var uid = el.getAttribute('data-uid'); S.revokeAsk = null;
+      peopleAct(api('DELETE', 'api/users/' + encodeURIComponent(uid)).then(function () { return api('GET', 'api/people'); }), function (r) { S.people = r; });
+    },
+    'traffic-load': function () {
+      api('GET', 'api/traffic').then(function (d) { S.traffic = d; S.trafficMsg = ''; render(); }, function (e) {
+        if (e.code === 401) { S.mode = 'nokey'; render(); return; }
+        S.trafficMsg = '불러오지 못했습니다. 다시 눌러 주세요.'; S.traffic = null; render();
+      });
     },
     example: function () { S.draftJson = JSON.stringify(EXAMPLE, null, 2); S.preview = null; check(); },
     check: check, save: save,
@@ -569,6 +696,14 @@ import EXAMPLE from './example.json';
       try { navigator.clipboard.writeText(GPT_PROMPT).then(function () { done(true); }, function () { done(false); }); } catch (e) { done(false); }
     }
   };
+  // 손님은 읽기만 한다. 등록·삭제·켜기/끄기·백업 버튼을 누르면 안내만 한다
+  ['toggle', 'row-del', 'del', 'save', 'backup', 'go-pending'].forEach(function (name) {
+    var fn = ACT[name];
+    ACT[name] = function (el) {
+      if (isGuest() && name !== 'go-pending') { S.warn = '보기 전용입니다. 초대 코드를 받아 입력하면 등록·삭제·켜기/끄기를 할 수 있습니다.'; showWarn(); return; }
+      return fn(el);
+    };
+  });
   document.addEventListener('click', function (ev) {
     var el = ev.target.closest('[data-act]'); if (!el || el.disabled) return;
     var fn = ACT[el.getAttribute('data-act')]; if (fn) fn(el);

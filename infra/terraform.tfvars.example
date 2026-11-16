@@ -4,6 +4,9 @@
 domain_name = "rewind.example.com"
 zone_name   = "example.com"
 
+# 도메인 아래 이 서비스의 경로. 비우면 도메인 루트를 쓴다 → https://example.com/english/
+base_path = "english"
+
 # 기본값을 바꾸고 싶을 때만
 # region = "ap-northeast-2"
 # name   = "rewind"

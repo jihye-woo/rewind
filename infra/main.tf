@@ -9,7 +9,8 @@
 
 locals {
   use_domain = var.domain_name != ""
-  base_url   = local.use_domain ? "https://${var.domain_name}" : aws_apigatewayv2_api.this.api_endpoint
+  base_path  = local.use_domain && var.base_path != "" ? "/${var.base_path}" : ""
+  base_url   = local.use_domain ? "https://${var.domain_name}${local.base_path}" : aws_apigatewayv2_api.this.api_endpoint
   # 직접 정한 키가 있으면 그것을, 없으면 무작위 키를 쓴다
   app_key = var.app_key != "" ? var.app_key : random_password.app_key.result
 }
@@ -56,6 +57,32 @@ resource "aws_dynamodb_table" "this" {
   deletion_protection_enabled = true
 }
 
+# 접속 기록(IP별). 요청마다 한 번 쓰므로 학습 데이터 테이블과 쓰기 용량을 나눠 쓰지 않게 따로 둔다.
+# 두 테이블을 합쳐도 상시 무료 한도(읽기·쓰기 25유닛) 안이다. 행은 마지막 접속 후 90일이 지나면 TTL 로 지워진다.
+resource "aws_dynamodb_table" "traffic" {
+  name           = "${var.name}-traffic"
+  billing_mode   = "PROVISIONED"
+  read_capacity  = 5
+  write_capacity = 5
+  hash_key       = "pk"
+  range_key      = "sk"
+
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+
+  attribute {
+    name = "sk"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "expiresAt"
+    enabled        = true
+  }
+}
+
 # ---------------------------------------------------------------------------
 # Lambda
 # ---------------------------------------------------------------------------
@@ -81,6 +108,12 @@ data "aws_iam_policy_document" "lambda" {
     sid       = "Table"
     actions   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:DeleteItem", "dynamodb:Query"]
     resources = [aws_dynamodb_table.this.arn]
+  }
+
+  statement {
+    sid       = "Traffic"
+    actions   = ["dynamodb:UpdateItem", "dynamodb:Query"]
+    resources = [aws_dynamodb_table.traffic.arn]
   }
 
   statement {
@@ -119,10 +152,12 @@ resource "aws_lambda_function" "this" {
 
   environment {
     variables = {
-      TABLE_NAME  = aws_dynamodb_table.this.name
-      APP_KEY     = local.app_key
-      MCP_KEY     = random_password.mcp_key.result
-      PUBLIC_READ = tostring(var.public_read)
+      TABLE_NAME         = aws_dynamodb_table.this.name
+      TRAFFIC_TABLE_NAME = aws_dynamodb_table.traffic.name
+      APP_KEY            = local.app_key
+      MCP_KEY            = random_password.mcp_key.result
+      PUBLIC_READ        = tostring(var.public_read)
+      BASE_PATH          = local.base_path
     }
   }
 
@@ -232,6 +267,10 @@ resource "aws_apigatewayv2_api_mapping" "this" {
   api_id      = aws_apigatewayv2_api.this.id
   domain_name = aws_apigatewayv2_domain_name.this[0].id
   stage       = aws_apigatewayv2_stage.default.id
+
+  # 이 경로로 오는 요청만 이 API 로 보낸다. 같은 도메인의 다른 경로에는 다른 서비스의 API 를 매핑할 수 있다.
+  # 루트(https://<도메인>/)에는 아무것도 매핑하지 않는다.
+  api_mapping_key = var.base_path != "" ? var.base_path : null
 }
 
 resource "aws_route53_record" "app" {

@@ -16,6 +16,17 @@ variable "domain_name" {
   default     = ""
 }
 
+variable "base_path" {
+  description = "도메인 아래 이 서비스의 경로 (예: english → https://<도메인>/english/). 같은 도메인에 다른 서비스를 다른 경로로 붙이기 위해 쓴다. domain_name 을 쓸 때만 적용된다"
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = can(regex("^([a-z0-9][a-z0-9-]*)?$", var.base_path))
+    error_message = "base_path 는 앞뒤 / 없이 소문자·숫자·- 로 적는다 (english)."
+  }
+}
+
 variable "zone_name" {
   description = "domain_name 이 속한 Route 53 호스팅 영역 이름 (예: example.com). domain_name 을 쓸 때만 필요하다"
   type        = string

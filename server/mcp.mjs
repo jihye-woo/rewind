@@ -107,7 +107,7 @@ const STATUS_KO = {
   candidate: '후보로 저장했습니다. 사용자가 앱에서 켜야 학습에 나옵니다',
 };
 
-async function callTool(name, args, { store, now }) {
+async function callTool(name, args, { store, now, user }) {
   if (name === 'add_items') {
     if (!args || !Array.isArray(args.items) || !args.items.length) {
       return { isError: true, content: [{ type: 'text', text: 'items 배열이 필요합니다. 항목마다 text와 meaning_ko는 꼭 넣어야 합니다.' }] };
@@ -123,7 +123,7 @@ async function callTool(name, args, { store, now }) {
     };
   }
   if (name === 'find_items') {
-    const items = await findItems(store, args && args.query, (args && args.limit) || 20);
+    const items = await findItems(store, args && args.query, (args && args.limit) || 20, user);
     return {
       content: [{ type: 'text', text: items.length ? JSON.stringify(items) : '일치하는 항목이 없습니다.' }],
       structuredContent: { items },

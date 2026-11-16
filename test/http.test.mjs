@@ -26,7 +26,7 @@ test('앱 화면과 아이콘은 인증 없이 내려 준다', async () => {
 
 test('앱 API는 접속 키가 맞아야 한다', async () => {
   const deps = mkDeps();
-  assert.equal((await call(deps, 'GET', '/api/state', { auth: false })).status, 401);
+  assert.equal((await call(deps, 'GET', '/api/state', { auth: false })).status, 401, 'publicRead 가 꺼져 있으면 손님도 막는다');
   assert.equal((await call(deps, 'GET', '/api/state', { auth: false, headers: { authorization: 'Bearer wrong' } })).status, 401);
   assert.equal((await call(deps, 'GET', '/api/state', { auth: false, headers: { authorization: 'Bearer ' + config.mcpKey } })).status, 401, 'MCP 키로는 앱 API를 쓸 수 없다');
   assert.equal((await call(deps, 'GET', '/api/state')).status, 200);

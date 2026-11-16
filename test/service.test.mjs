@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { createMemoryStore } from '../server/store-memory.mjs';
 import * as service from '../server/service.mjs';
 
+const OWNER = { uid: 'owner', role: 'owner', name: '주인' };
+const view = async (store, id, user = OWNER) => (await service.getState(store, user)).items.find((i) => i.id === id);
+
 const item = (text, extra = {}) => ({ text, meaning_ko: text + ' 뜻', examples: [{ en: `I [${text}] it.` }, { en: `They [${text}] it.` }, { en: `We [${text}] it.` }], ...extra });
 
 test('addItems: 새 항목, 병합, 후보, 후보 수락을 구분해 돌려준다', async () => {
@@ -42,22 +45,22 @@ test('patchItem: 학습 상태만 바꾸고 값의 형식을 검사한다', asyn
   const store = createMemoryStore();
   await service.addItems(store, { picked_by: 'user', items: [item('swamped')] }, 1);
   const st = { h: 1, last: 5, intro: 5, seen: 1, right: 0, wrong: 0, recent: '', sq: 1 };
-  const out = await service.patchItem(store, 'swamped', { st, off: true, text: 'hacked' });
+  const out = await service.patchItem(store, OWNER, 'swamped', { st, off: true, text: 'hacked' });
   assert.deepEqual(out.st, st); assert.equal(out.off, true); assert.equal(out.text, 'swamped', '등록 내용은 바뀌지 않는다');
-  assert.equal(await service.patchItem(store, 'missing', { off: true }), null);
-  await assert.rejects(service.patchItem(store, 'swamped', { st: { h: -1 } }), service.InputError);
-  await assert.rejects(service.patchItem(store, 'swamped', {}), service.InputError);
-  await assert.rejects(service.patchItem(store, '../x', { off: true }), service.InputError);
+  assert.equal(await service.patchItem(store, OWNER, 'missing', { off: true }), null);
+  await assert.rejects(service.patchItem(store, OWNER, 'swamped', { st: { h: -1 } }), service.InputError);
+  await assert.rejects(service.patchItem(store, OWNER, 'swamped', {}), service.InputError);
+  await assert.rejects(service.patchItem(store, OWNER, '../x', { off: true }), service.InputError);
 });
 
 test('putSession: 형식을 정리해 저장하고 최신순으로 돌려준다', async () => {
   const store = createMemoryStore();
-  await service.putSession(store, 's1794717536455', { startedAt: 1794717536455, endedAt: null, ev: [{ i: 'bubbly', t: 'intro', at: 1 }, { i: 'bubbly', t: 'meaning', at: 2, r: 1, junk: 'x' }] });
-  await service.putSession(store, 's1794717600000', { startedAt: 1794717600000, ev: [] });
+  await service.putSession(store, OWNER, 's1794717536455', { startedAt: 1794717536455, endedAt: null, ev: [{ i: 'bubbly', t: 'intro', at: 1 }, { i: 'bubbly', t: 'meaning', at: 2, r: 1, junk: 'x' }] });
+  await service.putSession(store, OWNER, 's1794717600000', { startedAt: 1794717600000, ev: [] });
   const s = await store.listSessions(10);
   assert.deepEqual(s.map((x) => x.id), ['s1794717600000', 's1794717536455']);
   assert.deepEqual(s[1].ev[1], { i: 'bubbly', t: 'meaning', at: 2, r: 1 });
-  await assert.rejects(service.putSession(store, 'bad', { startedAt: 1 }), service.InputError);
+  await assert.rejects(service.putSession(store, OWNER, 'bad', { startedAt: 1 }), service.InputError);
 });
 
 test('importAll: 프로토타입에서 내보낸 데이터를 등록 시각·학습 상태·꺼짐 그대로 되살린다', async () => {
@@ -77,12 +80,12 @@ test('importAll: 프로토타입에서 내보낸 데이터를 등록 시각·학
   assert.equal((await store.listSessions(10))[0].n, 8);
 
   // 다시 넣으면 건너뛰고, 그 사이 쌓인 학습 상태를 덮어쓰지 않는다
-  await service.patchItem(store, 'gorgeous', { st: { ...by.gorgeous.st, seen: 9 } });
+  await service.patchItem(store, OWNER, 'gorgeous', { st: { ...by.gorgeous.st, seen: 9 } });
   r = await service.importAll(store, data);
   assert.deepEqual([r.items.imported, r.items.skipped], [0, 6]);
-  assert.equal((await store.getItem('gorgeous')).st.seen, 9);
+  assert.equal((await view(store, 'gorgeous')).st.seen, 9);
   r = await service.importAll(store, data, { overwrite: true });
-  assert.equal(r.items.imported, 6); assert.equal((await store.getItem('gorgeous')).st.seen, 2);
+  assert.equal(r.items.imported, 6); assert.equal((await view(store, 'gorgeous')).st.seen, 2);
 
   // 잘못된 항목은 그것만 거절한다
   r = await service.importAll(createMemoryStore(), { items: [{ text: 'x' }, { text: 'ok', meaning_ko: '뜻', st: { h: -3 } }, { text: 'fine', meaning_ko: '뜻' }], sessions: [{ id: 'bad' }] });

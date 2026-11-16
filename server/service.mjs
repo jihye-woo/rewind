@@ -44,10 +44,26 @@ export async function addItems(store, payload, now = Date.now()) {
   return { results, errors: n.errors, warnings: n.warnings, items: saved };
 }
 
+/**
+ * 공유 항목에 그 사람의 학습 상태를 얹는다.
+ * 단어 내용과 후보(pending) 여부는 모두가 같이 쓰고, st(진도)와 off(켜짐/꺼짐)는 사람마다 따로다.
+ * 행이 없으면: 주인은 예전처럼 항목 문서의 값을, 다른 사람은 처음 상태(st 없음, off 는 항목의 기본값)를 쓴다.
+ */
+export function viewItem(item, user, row) {
+  const st = row && 'st' in row ? row.st : (user && user.uid === 'owner' ? item.st ?? null : null);
+  const off = row && 'off' in row ? !!row.off : !!item.off;
+  return { ...item, st, off, pending: !!item.pending };
+}
+
+export async function viewItems(store, user, items) {
+  const rows = user && user.uid ? await store.listStates(user.uid) : {};
+  return items.map((it) => viewItem(it, user, rows[it.id]));
+}
+
 /** 등록된 항목 검색. query가 비면 최근 등록 순으로 돌려준다. */
-export async function findItems(store, query, limit = 20) {
+export async function findItems(store, query, limit = 20, user) {
   const q = Core.normText(query || '');
-  const all = await store.listItems();
+  const all = await viewItems(store, user, await store.listItems());
   const hit = (it) => !q
     || Core.normText(it.text).includes(q)
     || String(it.meaning_ko || '').toLowerCase().includes(q)
@@ -58,8 +74,12 @@ export async function findItems(store, query, limit = 20) {
     .map((it) => ({ id: it.id, text: it.text, kind: it.kind, meaning_ko: it.meaning_ko, state: stateOf(it), examples: (it.examples || []).length }));
 }
 
-export async function getState(store) {
-  const [items, sessions] = await Promise.all([store.listItems(), store.listSessions(120)]);
+/** 그 사람의 화면 상태. 손님(uid 없음)은 진도와 세션이 비어 있다. */
+export async function getState(store, user) {
+  const [items, sessions] = await Promise.all([
+    store.listItems().then((all) => viewItems(store, user, all)),
+    user && user.uid ? store.listSessions(120, user.uid) : [],
+  ]);
   return { items, sessions, serverTime: Date.now() };
 }
 
@@ -79,8 +99,11 @@ function cleanSt(st) {
   };
 }
 
-/** 항목의 학습 상태·켜짐/꺼짐만 바꾼다. 등록 내용은 건드리지 않는다. */
-export async function patchItem(store, id, patch) {
+/**
+ * 그 사람의 학습 상태·켜짐/꺼짐을 바꾼다. 등록 내용은 건드리지 않는다.
+ * pending: false(후보를 학습에 넣기)는 공유 항목에 적용되어 모두에게 후보가 아니게 된다.
+ */
+export async function patchItem(store, user, id, patch) {
   if (!ITEM_ID.test(id)) throw new InputError('항목 ID가 올바르지 않습니다.');
   if (!patch || typeof patch !== 'object') throw new InputError('본문이 비어 있습니다.');
   const clean = {};
@@ -88,7 +111,22 @@ export async function patchItem(store, id, patch) {
   if ('off' in patch) clean.off = !!patch.off;
   if ('pending' in patch) clean.pending = !!patch.pending;
   if (!Object.keys(clean).length) throw new InputError('바꿀 값이 없습니다. st, off, pending 중 하나를 보내세요.');
-  return store.patchItem(id, clean); // 없는 항목이면 null
+  let item = await store.getItem(id);
+  if (!item) return null;
+  if ('pending' in clean && clean.pending !== !!item.pending) {
+    // 후보를 받아들이면 항목의 기본값도 켜짐으로 바꾼다. 아직 행이 없는 다른 사람에게도 켜진 채 보인다.
+    item = await store.patchItem(id, clean.pending ? { pending: true } : { pending: false, off: false });
+    if (!item) return null;
+  }
+  const mine = {};
+  if ('st' in clean) mine.st = clean.st;
+  if ('off' in clean) mine.off = clean.off;
+  let row = await store.getStateRow(user.uid, id);
+  if (Object.keys(mine).length) {
+    await store.patchState(user.uid, id, mine);
+    row = { ...(row || {}), ...mine };
+  }
+  return viewItem(item, user, row);
 }
 
 export async function deleteItem(store, id) {
@@ -97,7 +135,7 @@ export async function deleteItem(store, id) {
 }
 
 /** 세션 로그 저장. 카드 결과는 덧붙이기만 하므로 문서 전체를 다시 쓴다. */
-export async function putSession(store, id, doc) {
+export async function putSession(store, user, id, doc) {
   if (!SESSION_ID.test(id)) throw new InputError('세션 ID가 올바르지 않습니다.');
   if (!doc || typeof doc !== 'object') throw new InputError('본문이 비어 있습니다.');
   const startedAt = num(doc.startedAt);
@@ -110,7 +148,7 @@ export async function putSession(store, id, doc) {
     return o;
   });
   const clean = { startedAt, endedAt: num(doc.endedAt), n: ev.length, ev };
-  await store.putSession(id, clean);
+  await store.putSession(id, clean, user.uid);
   return clean;
 }
 
@@ -132,17 +170,19 @@ export async function importAll(store, data, { overwrite = false } = {}) {
     catch (e) { out.items.rejected.push(item.text + ': ' + e.message); continue; }
     item.off = !!raw.off; item.pending = !!raw.pending;
     await store.putItem(item);
+    await store.patchState('owner', item.id, { st: item.st, off: item.off }); // 되살리기는 주인만 한다
     out.items.imported++;
   }
   for (const s of (Array.isArray(data.sessions) ? data.sessions : []).slice(0, 20000)) {
     const id = s && (s.id || (num(s.startedAt) !== null ? 's' + s.startedAt : ''));
-    try { await putSession(store, String(id), s); out.sessions.imported++; }
+    try { await putSession(store, { uid: 'owner' }, String(id), s); out.sessions.imported++; }
     catch (e) { out.sessions.rejected.push(String(id) + ': ' + e.message); }
   }
   return out;
 }
 
-export async function exportAll(store) {
-  const [items, sessions] = await Promise.all([store.listItems(), store.listSessions(100000)]);
+/** 공유 항목(그 사람의 진도를 얹어서)과 그 사람의 세션 로그. */
+export async function exportAll(store, user) {
+  const [items, sessions] = await Promise.all([store.listItems().then((all) => viewItems(store, user, all)), store.listSessions(100000, user.uid)]);
   return { exportedAt: new Date().toISOString(), items, sessions };
 }
