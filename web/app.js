@@ -10,7 +10,7 @@ import EXAMPLE from './example.json';
   'use strict';
   var DAY = C.DAY;
   var KEY_LS = 'rewind-key';
-  var VIEWS = ['study', 'items', 'add', 'stats'];
+  var VIEWS = ['study', 'items', 'add', 'stats', 'settings'];
   var S = {
     mode: 'loading', note: '', warn: '', view: 'study', items: [], byId: {}, sessions: [],
     sess: null, filter: 'all', detail: null, confirmDel: false, delAsk: null,
@@ -471,28 +471,58 @@ import EXAMPLE from './example.json';
   }
 
   /* ---------- stats ---------- */
+  var WEEKDAY = ['일', '월', '화', '수', '목', '금', '토'];
+  /** 최근 7일, 날마다 본 카드 수 (오늘이 맨 오른쪽) */
+  function lastWeek(now) {
+    var out = [], byDay = {};
+    S.sessions.forEach(function (s) { var k = C.dayKey(s.startedAt); byDay[k] = (byDay[k] || 0) + ((s.ev && s.ev.length) || 0); });
+    for (var i = 6; i >= 0; i--) { var t = now - i * DAY; out.push({ t: t, n: byDay[C.dayKey(t)] || 0, today: i === 0 }); }
+    return out;
+  }
   function statsView() {
-    var now = Date.now(), st = C.computeStats(S.items, S.sessions, now);
-    var h = '<div class="tiles">' +
-      '<div class="tile"><b>' + st.streak + '</b><span>연속 학습 일수</span></div>' +
-      '<div class="tile"><b>' + st.today + '</b><span>오늘 본 카드</span></div>' +
-      '<div class="tile"><b>' + (st.weekAcc == null ? '없음' : Math.round(st.weekAcc * 100) + '%') + '</b><span>최근 7일 퀴즈 정답률' + (st.weekQuiz ? ' (' + st.weekQuiz + '문제)' : '') + '</span></div>' +
-      '<div class="tile"><b>' + st.due + '</b><span>복습할 항목</span></div></div>';
-    h += '<div class="sec">단계별 항목 수 · 전체 ' + st.total + '개</div><div class="tiles">' +
-      '<div class="tile"><b>' + st.by.queued + '</b><span>대기</span></div><div class="tile"><b>' + st.by.learning + '</b><span>익히는 중</span></div><div class="tile"><b>' + st.by.familiar + '</b><span>익숙함</span></div><div class="tile"><b>' + st.by.off + '</b><span>꺼짐</span></div></div>' +
-      (st.by.pending ? '<div class="small">이와 별도로 확인을 기다리는 후보가 ' + st.by.pending + '개 있습니다.</div>' : '');
-    h += '<div class="sec">자주 틀리는 항목</div>';
-    h += st.weak.length ? '<div class="list">' + st.weak.map(function (i) {
-      return '<button class="row" data-act="open-from-stats" data-id="' + esc(i.id) + '"><div class="t"><b>' + esc(i.text) + '</b><span class="s">틀림 ' + i.st.wrong + ' · 맞힘 ' + i.st.right + '</span></div><div class="m">' + esc(i.meaning_ko) + '</div></button>';
-    }).join('') + '</div>' : '<div class="card empty">아직 틀린 항목이 없습니다.</div>';
-    var recent = S.sessions.filter(function (s) { return s.ev && s.ev.length; }).sort(function (a, b) { return b.startedAt - a.startedAt; }).slice(0, 10);
-    h += '<div class="sec">최근 세션</div>';
-    h += recent.length ? '<div class="list">' + recent.map(function (s) {
-      var q = 0, r = 0; s.ev.forEach(function (e) { if ((e.r === 1 || e.r === 0) && !e.x) { q++; r += e.r; } });
-      return '<div class="row"><div class="t"><span>' + fmtTime(s.startedAt) + '</span><span class="s">카드 ' + s.ev.length + '장 · 퀴즈 ' + (q ? r + '/' + q : '없음') + '</span></div></div>';
-    }).join('') + '</div>' : '<div class="card empty">아직 마친 세션이 없습니다.</div>';
-    if (!isGuest()) h += '<button class="btn" data-act="backup" style="align-self:flex-start">전체 기록 백업 받기 (JSON)</button>';
-    h += peopleView();
+    var now = Date.now(), st = C.computeStats(S.items, S.sessions, now), h = '';
+    // 1. 핵심 숫자 세 개를 크게
+    h += '<section class="hero"><div class="hero-n"><b>' + st.today + '</b><span>오늘 본 카드</span></div>' +
+      '<div class="hero-n"><b>' + st.streak + '<small>일</small></b><span>연속 학습</span></div>' +
+      '<div class="hero-n"><b>' + (st.weekAcc == null ? '–' : Math.round(st.weekAcc * 100) + '<small>%</small>') + '</b><span>7일 정답률' + (st.weekQuiz ? ' · ' + st.weekQuiz + '문제' : '') + '</span></div></section>';
+    if (st.due) h += '<button class="btn primary cta" data-act="go-study">복습할 항목 ' + st.due + '개 · 지금 복습하기</button>';
+    // 2. 진도를 막대 하나로
+    var parts = [['familiar', '익숙함', st.by.familiar], ['learning', '익히는 중', st.by.learning], ['queued', '대기', st.by.queued], ['off', '꺼짐', st.by.off]];
+    var total = parts.reduce(function (a, x) { return a + x[2]; }, 0) || 1;
+    h += '<section class="panel"><div class="panel-h"><h2>진도</h2><span class="small">전체 ' + st.total + '개</span></div>' +
+      '<div class="stack" role="img" aria-label="' + parts.map(function (x) { return x[1] + ' ' + x[2] + '개'; }).join(', ') + '">' +
+      parts.map(function (x) { return x[2] ? '<i class="s-' + x[0] + '" style="flex:' + x[2] + '"></i>' : ''; }).join('') + '</div>' +
+      '<div class="legend">' + parts.map(function (x) { return '<span><i class="s-' + x[0] + '"></i>' + x[1] + ' <b>' + x[2] + '</b></span>'; }).join('') + '</div>' +
+      (st.by.pending ? '<button class="btn sm" data-act="go-pending" style="align-self:flex-start">확인을 기다리는 후보 ' + st.by.pending + '개 보기</button>' : '') + '</section>';
+    // 3. 최근 7일 활동
+    var week = lastWeek(now), max = Math.max.apply(null, week.map(function (d) { return d.n; }).concat([1]));
+    h += '<section class="panel"><div class="panel-h"><h2>최근 7일</h2><span class="small">하루에 본 카드</span></div><div class="week">' +
+      week.map(function (d) {
+        return '<div class="day' + (d.today ? ' today' : '') + (d.n ? '' : ' none') + '"><span class="n">' + (d.n || '') + '</span><i style="height:' + Math.max(d.n ? 8 : 3, Math.round(d.n / max * 72)) + 'px"></i><span class="d">' + (d.today ? '오늘' : WEEKDAY[new Date(d.t).getDay()]) + '</span></div>';
+      }).join('') + '</div></section>';
+    // 4. 자주 틀리는 항목
+    h += '<section class="panel"><div class="panel-h"><h2>자주 틀리는 항목</h2></div>';
+    h += st.weak.length ? '<div class="chips">' + st.weak.map(function (i) {
+      return '<button class="chip weak" data-act="open-from-stats" data-id="' + esc(i.id) + '"><b>' + esc(i.text) + '</b> <span>틀림 ' + i.st.wrong + '</span></button>';
+    }).join('') + '</div>' + (S.ro ? '' : '<button class="btn" data-act="review-weak" style="align-self:flex-start">이 항목들만 복습하기</button>')
+      : '<div class="small">아직 틀린 항목이 없습니다.</div>';
+    h += '</section>';
+    // 최근 세션은 짧게
+    var recent = S.sessions.filter(function (s) { return s.ev && s.ev.length; }).sort(function (a, b) { return b.startedAt - a.startedAt; }).slice(0, 5);
+    if (recent.length) {
+      h += '<section class="panel"><div class="panel-h"><h2>최근 세션</h2></div><div class="sess">' + recent.map(function (s) {
+        var q = 0, r = 0; s.ev.forEach(function (e) { if ((e.r === 1 || e.r === 0) && !e.x) { q++; r += e.r; } });
+        return '<div><span>' + fmtTime(s.startedAt) + '</span><span>카드 ' + s.ev.length + '장 · 퀴즈 ' + (q ? r + '/' + q : '없음') + '</span></div>';
+      }).join('') + '</div></section>';
+    }
+    return h;
+  }
+
+  /* ---------- 설정: 백업, 사람과 기기, ChatGPT, 접속 기록 ---------- */
+  function settingsView() {
+    if (isGuest()) return '<div class="card"><h2>설정</h2><p class="small">읽기 전용으로 보는 중입니다. 초대받으면 백업, 기기 추가, ChatGPT 연결을 할 수 있습니다.</p><button class="btn primary" data-act="key-open" style="align-self:flex-start">초대 코드 입력</button></div>';
+    var h = peopleView();
+    h += '<div class="sec">백업</div><div class="card"><div class="small">공유 단어장과 내 진도·세션 기록을 JSON 파일로 받습니다.</div><button class="btn" data-act="backup" style="align-self:flex-start">전체 기록 백업 받기 (JSON)</button></div>';
     if (S.me.role === 'owner') h += trafficView();
     return h;
   }
@@ -607,6 +637,7 @@ import EXAMPLE from './example.json';
     else if (S.view === 'study') h += S.sess ? sessionView() : studyHome();
     else if (S.view === 'items') h += itemsView();
     else if (S.view === 'add') h += S.ro ? '<div class="card empty"><p>등록은 초대받은 사람만 할 수 있습니다.</p></div>' : addView();
+    else if (S.view === 'settings') h += settingsView();
     else h += statsView();
     m.innerHTML = h;
   }
@@ -618,6 +649,14 @@ import EXAMPLE from './example.json';
 
   var ACT = {
     start: function () { startSession(); },
+    'go-study': function () { location.hash = '#study'; },
+    'review-weak': function () {
+      // 자주 틀리는 항목만 퀴즈로. 결과는 평소 세션처럼 진도와 기록에 남는다
+      var now = Date.now(), weak = C.computeStats(S.items, S.sessions, now).weak;
+      if (!weak.length) return;
+      S.sess = { id: 's' + now, startedAt: now, cards: weak.map(function (i) { return { id: i.id, type: 'quiz' }; }), idx: 0, ev: [], retryCount: 0, newIds: [], phase: 'front', answered: null, cur: null, done: false };
+      location.hash = '#study'; prepare(); render(); window.scrollTo(0, 0);
+    },
     'key-open': function () { S.flash = ''; S.mode = 'nokey'; render(); var el = $('#key-input'); if (el) el.focus(); },
     'key-cancel': function () {
       // 로그인 쿠키를 지우고 키 없이 다시 읽는다. 서버가 읽기 전용을 막아 두었으면 다시 이 화면으로 온다.
