@@ -9,6 +9,7 @@
  * 수정·삭제 도구는 일부러 두지 않았다. 서버 주소가 새더라도 기록이 지워지지 않게 하기 위해서다.
  */
 import { addItems, findItems } from './service.mjs';
+import * as rewinds from './rewinds.mjs';
 
 export const SUPPORTED_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const SERVER_INFO = { name: 'rewind', title: 'Rewind 영어 복습', version: '1.0.0' };
@@ -23,6 +24,13 @@ const INSTRUCTIONS = [
   'The word list is organized as expression → senses. One expression (dictionary base form) can have several meanings; each meaning is studied separately. Inflected forms (applied, applying) belong to the base form (apply).',
   '- Before adding an expression that may already be saved, call find_items. To add examples to an existing meaning, pass its id as sense_id. To add a different meaning, set new_sense: true.',
   '- The user practices SPEAKING. Write examples the user could say or write as-is, in the register that fits the expression (casual conversation, business, finance, news...), and set register.',
+  'REWINDS (리와인즈, "최적화", "정제"): when the user asks to run rewinds, improve the word list toward its goal.',
+  '1. Call rewinds_targets. Each target is one meaning with its current content and its gaps.',
+  '2. For each target, fix every gap: set register; bring examples to about 10 in different situations, in that register, with [ ] around the target and a natural Korean translation; replace every overexposed example with a new one for the same situation (replace_examples with its key); add 2-3 contrasts (a confusable expression, when to use which in Korean, and one sentence where that one fits); add collocations; add 3 wrong meanings and 3 wrong fills.',
+  '3. trends ("요즘 활용 문장", 2-3 sentences): for news, finance, business or tech expressions, SEARCH current news/trends and write sentences tied to them, with topic, source, url and date. For everyday expressions, do not search; write fresh sentences from everyday life today. Not everything needs news.',
+  '4. If two targets are duplicates, or one is only an inflected form of another (applied vs apply), merge with merge_into instead of editing both.',
+  '5. Send ALL fixes in ONE rewinds_apply call. Then tell the user, in Korean, how many meanings you improved and what changed, and the run_id. If the user is unhappy, rewinds_undo with that run_id (or one change_id from rewinds_history).',
+  'Never invent progress or remove the original source sentence; the server keeps study progress untouched.',
 ].join('\n');
 
 const relation = {
@@ -105,6 +113,81 @@ export const TOOLS = [
     },
     annotations: { title: '등록된 항목 검색', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
+  {
+    name: 'rewinds_targets',
+    title: 'rewinds: 고칠 뜻 꺼내기',
+    description: 'First step of rewinds (단어장 최적화). Returns the meanings that fall short of the word-list goal, most urgent first, each with its current content (examples with key and how many times shown), its gaps, and overexposed examples to replace. Read the server instructions for how to fix each gap, then send all fixes in one rewinds_apply call.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'integer', minimum: 1, maximum: 15, description: 'How many meanings to fix this time. Default 10.' },
+        ids: { type: 'array', items: { type: 'string' }, description: 'Only these meaning ids or expression ids (e.g. when the user names words to refine).' },
+      },
+    },
+    annotations: { title: 'rewinds: 고칠 뜻 꺼내기', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'rewinds_apply',
+    title: 'rewinds: 한 번에 고치기',
+    description: 'Second step of rewinds. Applies all fixes at once, immediately (no approval). Study progress is never changed; every change is logged and can be undone with rewinds_undo. Per meaning: "set" replaces the given fields; examples are edited with remove_examples (keys), replace_examples ({key, en, ko}) and add_examples ({en, ko}); max 12 examples. Use merge_into to merge a duplicate meaning (or an inflected-form entry) into another meaning; progress keeps whichever of the two was studied more, per person.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        note: { type: 'string', description: 'One line about this run (optional).' },
+        updates: {
+          type: 'array', minItems: 1, maxItems: 20,
+          items: {
+            type: 'object',
+            properties: {
+              sense_id: { type: 'string', description: 'Meaning id from rewinds_targets.' },
+              merge_into: { type: 'string', description: 'Merge this meaning into that meaning id instead of editing it.' },
+              set: {
+                type: 'object',
+                properties: {
+                  meaning_ko: { type: 'string' }, register: { type: 'string', description: 'casual, business, finance, news, formal, academic, slang...' },
+                  note: { type: 'string', description: 'Nuance and usage in Korean, 1-3 sentences.' },
+                  collocations: { type: 'array', maxItems: 8, items: { type: 'string' } },
+                  contrasts: {
+                    type: 'array', maxItems: 4, description: 'Confusable expressions: when to use which, and a sentence where THAT expression fits.',
+                    items: { type: 'object', properties: { text: { type: 'string' }, when_ko: { type: 'string' }, example: { type: 'object', properties: { en: { type: 'string' }, ko: { type: 'string' } } } }, required: ['text', 'when_ko'] },
+                  },
+                  trends: {
+                    type: 'array', maxItems: 4, description: 'Current-usage sentences. For news/finance/business/tech expressions, tie them to current news you searched (topic, source, url, date). For everyday expressions, fresh everyday scenes (topic only).',
+                    items: { type: 'object', properties: { en: { type: 'string', description: 'Put [ ] around the target.' }, ko: { type: 'string' }, topic: { type: 'string' }, source: { type: 'string' }, url: { type: 'string' }, date: { type: 'string', description: 'YYYY-MM-DD' } }, required: ['en'] },
+                  },
+                  wrong_meanings_ko: { type: 'array', maxItems: 6, items: { type: 'string' } },
+                  wrong_fills: { type: 'array', maxItems: 6, items: { type: 'string' } },
+                  synonyms: { type: 'array', maxItems: 8, items: { type: 'object', properties: { text: { type: 'string' }, note: { type: 'string' } }, required: ['text'] } },
+                  antonyms: { type: 'array', maxItems: 8, items: { type: 'object', properties: { text: { type: 'string' }, note: { type: 'string' } }, required: ['text'] } },
+                  ipa: { type: 'string' }, forms: { type: 'array', items: { type: 'string' }, description: 'Inflected forms to add to the expression.' },
+                },
+              },
+              add_examples: { type: 'array', maxItems: 12, items: { type: 'object', properties: { en: { type: 'string' }, ko: { type: 'string' } }, required: ['en'] } },
+              replace_examples: { type: 'array', maxItems: 12, items: { type: 'object', properties: { key: { type: 'string' }, en: { type: 'string' }, ko: { type: 'string' } }, required: ['key', 'en'] } },
+              remove_examples: { type: 'array', maxItems: 12, items: { type: 'string' }, description: 'Example keys to remove.' },
+            },
+            required: ['sense_id'],
+          },
+        },
+      },
+      required: ['updates'],
+    },
+    annotations: { title: 'rewinds: 한 번에 고치기', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  },
+  {
+    name: 'rewinds_history',
+    title: 'rewinds: 고친 기록',
+    description: 'Recent rewinds runs and their changes (run_id, change_id, what changed, whether undone).',
+    inputSchema: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 30 } } },
+    annotations: { title: 'rewinds: 고친 기록', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'rewinds_undo',
+    title: 'rewinds: 되돌리기',
+    description: 'Undo a whole rewinds run (run_id) or one change (change_id). A meaning that was edited again afterwards is not overwritten; the result says so.',
+    inputSchema: { type: 'object', properties: { run_id: { type: 'string' }, change_id: { type: 'string' } } },
+    annotations: { title: 'rewinds: 되돌리기', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+  },
 ];
 
 const STATUS_KO = {
@@ -136,6 +219,21 @@ async function callTool(name, args, { store, now, user }) {
       content: [{ type: 'text', text: items.length ? JSON.stringify(items) : '일치하는 항목이 없습니다.' }],
       structuredContent: { items },
     };
+  }
+  if (name.startsWith('rewinds_')) {
+    if (!user || user.role !== 'owner') {
+      if (name === 'rewinds_apply' || name === 'rewinds_undo') return { isError: true, content: [{ type: 'text', text: '단어장을 고치는 것은 주인만 할 수 있습니다.' }] };
+    }
+    const out = name === 'rewinds_targets' ? await rewinds.targets(store, args || {}, now)
+      : name === 'rewinds_apply' ? await rewinds.apply(store, args || {}, now)
+      : name === 'rewinds_history' ? await rewinds.history(store, args || {})
+      : name === 'rewinds_undo' ? await rewinds.undo(store, args || {}, now) : null;
+    if (!out) return null;
+    const text = name === 'rewinds_targets' ? `고칠 뜻 ${out.targets.length}개 (모자란 칸이 있는 뜻은 모두 ${out.total_with_gaps}개). 오늘: ${out.today}`
+      : name === 'rewinds_apply' ? `run_id ${out.run_id}: ${out.results.filter((r) => r.change_id).length}개 고침` + (out.errors.length ? `, 거절 ${out.errors.length}개: ${out.errors.join(' / ')}` : '') + (out.warnings.length ? `, 경고: ${out.warnings.join(' / ')}` : '')
+      : name === 'rewinds_undo' ? `되돌림 ${out.undone.length}개` + (out.skipped.length ? `, 못 되돌림 ${out.skipped.length}개: ${out.skipped.map((x) => x.reason).join(' / ')}` : '')
+      : `최근 실행 ${out.runs.length}개`;
+    return { isError: name === 'rewinds_apply' && out.results.every((r) => !r.change_id) && out.errors.length > 0, content: [{ type: 'text', text: text + '\n' + JSON.stringify(out) }], structuredContent: out };
   }
   return null;
 }

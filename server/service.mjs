@@ -175,6 +175,7 @@ export async function putSession(store, user, id, doc) {
     if (e.r === 0 || e.r === 1) o.r = e.r;
     if (e.v) o.v = String(e.v).slice(0, 10);
     if (e.x) o.x = 1;
+    if (e.ex) o.ex = String(e.ex).slice(0, 12); // 보여 준 예문의 키 (Core.exKey)
     return o;
   });
   const clean = { startedAt, endedAt: num(doc.endedAt), n: ev.length, ev };

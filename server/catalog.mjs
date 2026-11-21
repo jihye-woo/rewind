@@ -16,7 +16,8 @@
  */
 import { Core } from '../shared/core.js';
 
-export const SENSE_FIELDS = ['meaning_ko', 'register', 'note', 'examples', 'synonyms', 'antonyms', 'wrong_meanings_ko', 'wrong_fills', 'priority', 'src', 'createdAt', 'pending', 'off', 'st'];
+export const SENSE_FIELDS = ['meaning_ko', 'register', 'note', 'examples', 'synonyms', 'antonyms', 'wrong_meanings_ko', 'wrong_fills', 'priority', 'src', 'createdAt', 'pending', 'off', 'st',
+  'collocations', 'contrasts', 'trends', 'refinedAt'];
 export const UNIT_ID = /^[a-z0-9][a-z0-9-]{0,89}(~[0-9]{1,3})?$/;
 
 export const exprIdOf = (unitId) => String(unitId).split('~')[0];

@@ -258,6 +258,7 @@ import EXAMPLE from './example.json';
     if (extra && extra.r != null) e.r = extra.r;
     if (extra && extra.v) e.v = extra.v;
     if (c.retry) e.x = 1;
+    if (s.cur.ex && s.cur.ex.en) e.ex = C.exKey(s.cur.ex.en); // 어느 예문을 보여 줬는지 (정제할 때 너무 많이 본 예문을 바꾼다)
     s.ev.push(e); persistSession();
     if (extra && extra.r === 0 && !c.retry && s.retryCount < C.CFG.retryMax) {
       s.cards.push({ id: it.id, type: 'quiz', prefer: s.cur.type, retry: true }); s.retryCount++;
@@ -395,6 +396,27 @@ import EXAMPLE from './example.json';
   function switchHtml(i) {
     return '<button class="switch" role="switch" aria-checked="' + (!i.off) + '" aria-label="' + esc(i.text) + ' 학습에 포함" data-act="toggle" data-id="' + esc(i.id) + '"><i></i><span>' + (i.off ? '꺼짐' : '학습 중') + '</span></button>';
   }
+  /** rewinds 가 채운 칸: 뉘앙스 대비, 요즘 활용 문장, 자주 같이 쓰는 말 */
+  function refinedHtml(it) {
+    var h = '';
+    if (it.contrasts && it.contrasts.length) {
+      h += '<div class="card"><h2>헷갈리는 표현과 구분</h2><div class="exlist">' + it.contrasts.map(function (c) {
+        return '<div><div><b class="en" style="font-size:16px">' + esc(c.text) + '</b></div><div class="small">' + esc(c.when_ko) + '</div>' +
+          (c.en ? '<div class="en" style="font-size:15.5px">' + esc(c.en) + '</div>' + (c.ko ? '<div class="ko">' + esc(c.ko) + '</div>' : '') : '') + '</div>';
+      }).join('') + '</div></div>';
+    }
+    if (it.trends && it.trends.length) {
+      h += '<div class="card"><h2>요즘 이렇게 써요</h2><div class="exlist">' + it.trends.map(function (t) {
+        var meta = [t.topic, t.source, t.date].filter(Boolean).map(esc).join(' · ');
+        return '<div><div class="en">' + lineHtml(t.en) + '</div>' + (t.ko ? '<div class="ko">' + esc(t.ko) + '</div>' : '') +
+          (meta ? '<div class="small">' + (t.url ? '<a href="' + esc(t.url) + '" target="_blank" rel="noopener noreferrer">' + meta + '</a>' : meta) + '</div>' : '') + '</div>';
+      }).join('') + '</div></div>';
+    }
+    if (it.collocations && it.collocations.length) {
+      h += '<div class="card"><h2>자주 같이 쓰는 말</h2><div class="chips">' + it.collocations.map(function (c) { return '<span class="chip" style="cursor:default">' + esc(c) + '</span>'; }).join('') + '</div></div>';
+    }
+    return h;
+  }
   function itemDetail(it, now) {
     var st = it.st || {}, sg = C.stage(it);
     return '<button class="btn quiet" data-act="back" style="align-self:flex-start">← 목록으로</button>' + captionHtml(it.src, '원문') +
@@ -403,7 +425,7 @@ import EXAMPLE from './example.json';
       ((it.register || (it.forms && it.forms.length)) ? '<div class="small">' + [it.register ? '톤: ' + esc(it.register) : '', it.forms && it.forms.length ? '활용: ' + it.forms.map(esc).join(', ') : ''].filter(Boolean).join(' · ') + '</div>' : '') +
       '<div class="meaning">' + esc(it.meaning_ko) + '</div>' + (it.note ? '<div class="note">' + esc(it.note) + '</div>' : '') +
       (it.examples.length ? '<hr><div class="exlist">' + it.examples.map(function (e) { return '<div><div class="en">' + lineHtml(e.en) + '</div>' + (e.ko ? '<div class="ko">' + esc(e.ko) + '</div>' : '') + '</div>'; }).join('') + '</div>' : '') +
-      relsHtml(it) + '</div>' +
+      relsHtml(it) + '</div>' + refinedHtml(it) +
       '<div class="tiles"><div class="tile"><b>' + (st.seen || 0) + '</b><span>본 횟수</span></div><div class="tile"><b>' + (st.right || 0) + ' / ' + (st.wrong || 0) + '</b><span>맞힘 / 틀림</span></div>' +
       '<div class="tile"><b>' + (C.learned(it) ? (st.h < 1 ? '1일 미만' : Math.round(st.h) + '일') : '없음') + '</b><span>기억 반감기</span></div></div>' +
       (C.learned(it) ? '<div class="small">최근 퀴즈 ' + dots(st) + (it.off ? '' : ' · ' + dueText(it, now)) + ' · 처음 본 날 ' + fmtDay(st.intro || st.last) + '</div>' : '') +

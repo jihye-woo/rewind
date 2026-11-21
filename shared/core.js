@@ -42,6 +42,12 @@ function slug(text) {
   return 'item-' + h.toString(36);
 }
 function exPlain(en) { return String(en).replace(/[\[\]]/g, ''); }
+/** 예문을 가리키는 짧은 키. 세션 기록에 어느 예문을 보여 줬는지 남기고, 정제할 때 예문을 고르는 데 쓴다 */
+function exKey(en) {
+  var s = exPlain(en).toLowerCase().replace(/\s+/g, ' ').trim(), h = 5381;
+  for (var i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
 function exFill(en) {
   var m = String(en).match(/\[([^\]]+)\]/g);
   return m ? m.map(function (s) { return s.slice(1, -1).trim(); }).join(' … ') : null;
@@ -92,7 +98,7 @@ function normalizePayload(raw, now) {
   var isrc = own && str(own.text) ? { text: str(own.text), ko: str(own.ko), origin: str(own.origin) } : src;
     var examples = arr(it.examples).map(function (e) {
       return typeof e === 'string' ? { en: str(e), ko: '' } : { en: str(e && e.en), ko: str(e && e.ko) };
-    }).filter(function (e) { return e.en; }).slice(0, 8)
+    }).filter(function (e) { return e.en; }).slice(0, 12)
       .map(function (e) { return { en: autoMark(e.en, text), ko: e.ko }; });
     if (!examples.length) warnings.push(label + ': 예문이 없어 뜻 문제만 나옵니다.');
     else if (!examples.some(function (e) { return exFill(e.en); })) warnings.push(label + ': 예문에 [ ] 표시가 없어 빈칸 문제는 나오지 않습니다.');
@@ -367,7 +373,7 @@ function computeStats(items, sessions, now) {
 }
 
 export const Core = {
-  CFG: CFG, DAY: DAY, normText: normText, slug: slug, exPlain: exPlain, exFill: exFill, autoMark: autoMark, stripFence: stripFence,
+  CFG: CFG, DAY: DAY, normText: normText, slug: slug, exPlain: exPlain, exKey: exKey, rel: rel, exFill: exFill, autoMark: autoMark, stripFence: stripFence,
   normalizePayload: normalizePayload, mergeItem: mergeItem, learned: learned, active: active, isRecent: isRecent, recentLeft: recentLeft, planNew: planNew, recallP: recallP, stage: stage, nextDue: nextDue,
   applyResult: applyResult, pickExample: pickExample, buildQuiz: buildQuiz, resolveQuiz: resolveQuiz, wantsQuiz: wantsQuiz, recentAccuracy: recentAccuracy,
   newQuota: newQuota, pickNew: pickNew, buildSession: buildSession, computeStats: computeStats, dayKey: dayKey, shuffle: shuffle

@@ -15,7 +15,7 @@ test('공식 클라이언트: 접속 → 도구 목록 → 등록 → 검색', a
     assert.match(client.getInstructions(), /picked_by/);
 
     const { tools } = await client.listTools();
-    assert.deepEqual(tools.map((t) => t.name), ['add_items', 'find_items']);
+    assert.deepEqual(tools.map((t) => t.name), ['add_items', 'find_items', 'rewinds_targets', 'rewinds_apply', 'rewinds_history', 'rewinds_undo']);
     assert.equal(tools[1].annotations.readOnlyHint, true);
     assert.equal(tools[0].annotations.readOnlyHint, false);
     assert.deepEqual(tools[0].inputSchema.required, ['items']);
