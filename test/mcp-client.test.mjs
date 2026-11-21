@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { startLocal } from '../server/local.mjs';
+import * as cat from '../server/catalog.mjs';
 
 test('공식 클라이언트: 접속 → 도구 목록 → 등록 → 검색', async () => {
   const local = await startLocal({ port: 0 });
@@ -38,7 +39,7 @@ test('공식 클라이언트: 접속 → 도구 목록 → 등록 → 검색', a
     assert.equal(bad.isError, true);
 
     // 앱에서는 사용자가 고른 것만 학습 대기로 보인다
-    const items = await local.store.listItems();
+    const items = (await cat.loadUnits(local.store)).sort((a, b) => b.id.localeCompare(a.id));
     assert.deepEqual(items.map((i) => [i.id, i.pending, i.off, i.src.text.slice(0, 5)]), [['keep-one-s-head-down', false, false, 'Kayla'], ['a-cross-word', true, true, 'Kayla']]);
   } finally {
     await client.close().catch(() => {});

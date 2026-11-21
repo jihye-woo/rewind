@@ -20,6 +20,9 @@ const INSTRUCTIONS = [
   '- If the user only pasted a sentence and said "save this", do NOT guess: list candidate expressions (base form + one-line Korean meaning), ask which ones to save, then save only the chosen ones with picked_by "user".',
   '- If the user says "pick for me", set picked_by to "assistant". Those items arrive as candidates and stay out of study sessions until the user accepts them in the app.',
   'Fill in as many fields as you can. The app builds its quizzes from examples, synonyms, antonyms, wrong_meanings_ko and wrong_fills.',
+  'The word list is organized as expression → senses. One expression (dictionary base form) can have several meanings; each meaning is studied separately. Inflected forms (applied, applying) belong to the base form (apply).',
+  '- Before adding an expression that may already be saved, call find_items. To add examples to an existing meaning, pass its id as sense_id. To add a different meaning, set new_sense: true.',
+  '- The user practices SPEAKING. Write examples the user could say or write as-is, in the register that fits the expression (casual conversation, business, finance, news...), and set register.',
 ].join('\n');
 
 const relation = {
@@ -34,8 +37,8 @@ export const TOOLS = [
     description: [
       'Save English words or expressions to the user\'s review app. Call this when the user asks to save/register an expression ("등록해 줘", "저장해 줘", "넣어 줘").',
       'Only save what the user chose. If they pasted a sentence without saying which expression they want, first show candidates and ask (see picked_by).',
-      'Saving the same expression again merges new examples and synonyms into the existing item; it never creates a duplicate.',
-      'The result lists, per item, whether it was created, merged, accepted (a candidate the user has now chosen) or stored as a candidate, plus warnings you can fix by calling again.',
+      'Expressions are matched by base form and known inflected forms. Within an expression, a meaning is chosen by sense_id, then new_sense, then an identical meaning_ko; otherwise a new meaning is added and a warning tells you, so you can resend with sense_id if it was the same meaning.',
+      'The result lists, per item, the meaning id (sense) and whether it was created, merged, new_sense, accepted (a candidate the user has now chosen) or stored as a candidate, plus warnings you can fix by calling again.',
     ].join(' '),
     inputSchema: {
       type: 'object',
@@ -61,6 +64,10 @@ export const TOOLS = [
             properties: {
               kind: { type: 'string', enum: ['word', 'phrase'], description: '"word" for a single word, "phrase" for an expression or pattern of two or more words.' },
               text: { type: 'string', description: 'Dictionary base form. For patterns mark slots with someone / something, e.g. "set someone up with something", "keep one\'s head down".' },
+              forms: { type: 'array', maxItems: 12, items: { type: 'string' }, description: 'Inflected forms of the base form, e.g. ["applied", "applies", "applying"]. Optional.' },
+              sense_id: { type: 'string', description: 'id of an existing meaning (from find_items) to add examples/synonyms to. Omit for a new expression.' },
+              new_sense: { type: 'boolean', description: 'true when this is a different meaning of an expression that is already saved.' },
+              register: { type: 'string', description: 'Tone of this meaning: casual, business, finance, news, formal, academic, slang... Examples should match it.' },
               ipa: { type: 'string', description: 'IPA pronunciation for single words, e.g. "/ˈɡɔːrdʒəs/".' },
               meaning_ko: { type: 'string', description: 'Korean meaning in one short line.' },
               note: { type: 'string', description: 'Nuance, register or usage caveats in one or two Korean sentences.' },
@@ -88,7 +95,7 @@ export const TOOLS = [
   {
     name: 'find_items',
     title: '등록된 항목 검색',
-    description: 'Search the words and expressions already saved in the user\'s review app. Use it to check whether an expression is already saved before adding it, or to answer "what have I saved?". An empty query returns the most recently saved items. state is one of: candidate (waiting for the user to accept), queued (saved, not started), learning, familiar, off.',
+    description: 'Search the words and expressions already saved in the user\'s review app. Use it to check whether an expression is already saved before adding it, or to answer "what have I saved?". An empty query returns the most recently saved items. Each result is one meaning: id is the meaning id (pass it as sense_id to add to that meaning), sense/senses tell which meaning of how many, forms are known inflected forms. state is one of: candidate (waiting for the user to accept), queued (saved, not started), learning, familiar, off.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -105,6 +112,7 @@ const STATUS_KO = {
   merged: '이미 있는 항목에 내용을 합쳤습니다',
   accepted: '후보였던 항목을 학습에 넣었습니다',
   candidate: '후보로 저장했습니다. 사용자가 앱에서 켜야 학습에 나옵니다',
+  new_sense: '이미 있는 표현에 새 뜻으로 추가했습니다',
 };
 
 async function callTool(name, args, { store, now, user }) {
@@ -114,7 +122,7 @@ async function callTool(name, args, { store, now, user }) {
     }
     const r = await addItems(store, args, now);
     const out = { results: r.results, errors: r.errors, warnings: r.warnings };
-    const lines = r.results.map((x) => `- ${x.text}: ${STATUS_KO[x.status]}`)
+    const lines = r.results.map((x) => `- ${x.text}${x.sense > 1 ? ` (뜻 ${x.sense}: ${x.meaning_ko})` : ''} [${x.id}]: ${STATUS_KO[x.status]}`)
       .concat(r.errors.map((e) => `- 거절: ${e}`), r.warnings.map((w) => `- 경고: ${w}`));
     return {
       isError: r.results.length === 0,

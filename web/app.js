@@ -62,6 +62,8 @@ import EXAMPLE from './example.json';
     return blank ? e.replace(/\[[^\]]+\]/g, '<span class="blank"></span>') : e.replace(/\[([^\]]+)\]/g, '<mark>$1</mark>');
   }
   function kindKo(k) { return k === 'phrase' ? '표현' : '단어'; }
+  /** 뜻이 여럿인 표현이면 몇 번째 뜻인지 (예: 뜻 2/3) */
+  function senseTag(it) { return it.senseCount > 1 ? ' <span class="sense-no">뜻 ' + it.senseNo + '/' + it.senseCount + '</span>' : ''; }
   function stageKo(s) { return { queued: '대기', learning: '익히는 중', familiar: '익숙함' }[s]; }
   function fmtDay(ms) { var d = new Date(ms); return (d.getMonth() + 1) + '/' + d.getDate(); }
   function fmtTime(ms) { var d = new Date(ms); return fmtDay(ms) + ' ' + ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
@@ -310,7 +312,7 @@ import EXAMPLE from './example.json';
     var k = kindKo(it.kind);
     if (q.type === 'intro') {
       h += captionHtml(it.src, '이 장면에서 나온 말');
-      h += '<div class="card"><div class="kind">새 항목 · ' + k + '</div><div class="target">' + esc(it.text) + '</div>' +
+      h += '<div class="card"><div class="kind">새 항목 · ' + k + '</div><div class="target">' + esc(it.text) + senseTag(it) + '</div>' +
         (it.ipa ? '<div class="ipa">' + esc(it.ipa) + '</div>' : '') +
         '<div class="meaning">' + esc(it.meaning_ko) + '</div>' + (it.note ? '<div class="note">' + esc(it.note) + '</div>' : '') +
         (it.examples.length ? '<hr><div class="exlist">' + it.examples.slice(0, 5).map(function (e) {
@@ -382,7 +384,7 @@ import EXAMPLE from './example.json';
       var ctl = S.ro ? '' : S.delAsk === i.id
         ? '<span class="small">기록까지 삭제할까요?</span><button class="btn sm" data-act="row-del-cancel">취소</button><button class="btn sm danger" data-act="row-del-yes" data-id="' + id + '">삭제</button>'
         : (i.pending ? '<button class="btn sm primary" data-act="toggle" data-id="' + id + '">학습에 넣기</button>' : switchHtml(i)) + '<button class="btn sm quiet danger" data-act="row-del" data-id="' + id + '">삭제</button>';
-      return '<div class="row item-row' + (i.off ? ' is-off' : '') + '"><button class="row-main" data-act="open" data-id="' + id + '"><div class="t"><b>' + esc(i.text) + '</b>' +
+      return '<div class="row item-row' + (i.off ? ' is-off' : '') + '"><button class="row-main" data-act="open" data-id="' + id + '"><div class="t"><b>' + esc(i.text) + senseTag(i) + '</b>' +
         '<span class="pill ' + (i.off ? '' : sg) + '">' + (i.pending ? '후보' : i.off ? '꺼짐' : stageKo(sg)) + '</span></div>' +
         '<div class="m">' + esc(i.meaning_ko) + '</div><div class="s"><span>' + kindKo(i.kind) + '</span>' +
         (C.learned(i) ? '<span>본 ' + st.seen + '회</span><span>맞힘 ' + st.right + ' · 틀림 ' + st.wrong + '</span>' + dots(st) + (i.off ? '' : '<span>' + dueText(i, now) + '</span>') : '<span>아직 시작 전</span>') +
@@ -397,7 +399,8 @@ import EXAMPLE from './example.json';
     var st = it.st || {}, sg = C.stage(it);
     return '<button class="btn quiet" data-act="back" style="align-self:flex-start">← 목록으로</button>' + captionHtml(it.src, '원문') +
       '<div class="card"><div class="kind">' + kindKo(it.kind) + ' · <span class="pill ' + (it.off ? '' : sg) + '">' + (it.pending ? '후보' : it.off ? '꺼짐' : stageKo(sg)) + '</span></div>' +
-      '<div class="target">' + esc(it.text) + '</div>' + (it.ipa ? '<div class="ipa">' + esc(it.ipa) + '</div>' : '') +
+      '<div class="target">' + esc(it.text) + senseTag(it) + '</div>' + (it.ipa ? '<div class="ipa">' + esc(it.ipa) + '</div>' : '') +
+      ((it.register || (it.forms && it.forms.length)) ? '<div class="small">' + [it.register ? '톤: ' + esc(it.register) : '', it.forms && it.forms.length ? '활용: ' + it.forms.map(esc).join(', ') : ''].filter(Boolean).join(' · ') + '</div>' : '') +
       '<div class="meaning">' + esc(it.meaning_ko) + '</div>' + (it.note ? '<div class="note">' + esc(it.note) + '</div>' : '') +
       (it.examples.length ? '<hr><div class="exlist">' + it.examples.map(function (e) { return '<div><div class="en">' + lineHtml(e.en) + '</div>' + (e.ko ? '<div class="ko">' + esc(e.ko) + '</div>' : '') + '</div>'; }).join('') + '</div>' : '') +
       relsHtml(it) + '</div>' +
@@ -503,7 +506,7 @@ import EXAMPLE from './example.json';
     // 4. 자주 틀리는 항목
     h += '<section class="panel"><div class="panel-h"><h2>자주 틀리는 항목</h2></div>';
     h += st.weak.length ? '<div class="chips">' + st.weak.map(function (i) {
-      return '<button class="chip weak" data-act="open-from-stats" data-id="' + esc(i.id) + '"><b>' + esc(i.text) + '</b> <span>틀림 ' + i.st.wrong + '</span></button>';
+      return '<button class="chip weak" data-act="open-from-stats" data-id="' + esc(i.id) + '"><b>' + esc(i.text) + senseTag(i) + '</b> <span>틀림 ' + i.st.wrong + '</span></button>';
     }).join('') + '</div>' + (S.ro ? '' : '<button class="btn" data-act="review-weak" style="align-self:flex-start">이 항목들만 복습하기</button>')
       : '<div class="small">아직 틀린 항목이 없습니다.</div>';
     h += '</section>';

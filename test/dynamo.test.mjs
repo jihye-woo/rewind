@@ -8,6 +8,7 @@ import dynalite from 'dynalite';
 import { DynamoDBClient, CreateTableCommand, waitUntilTableExists } from '@aws-sdk/client-dynamodb';
 import { createDynamoStore, createDynamoTraffic } from '../server/store-dynamo.mjs';
 import * as service from '../server/service.mjs';
+import * as cat from '../server/catalog.mjs';
 
 const OWNER = { uid: 'owner', role: 'owner', name: '주인' };
 
@@ -33,7 +34,7 @@ test('DynamoDB 저장소: 등록, 상태 변경, 세션, 삭제', async () => {
     { text: 'bubbly', meaning_ko: '샴페인', note: '', examples: [{ en: 'Pop the [bubbly]!', ko: '' }], antonyms: [] },
     { text: 'gorgeous', meaning_ko: '아주 아름다운' },
   ] }, 1000);
-  let items = await store.listItems();
+  let items = await cat.loadUnits(store);
   assert.deepEqual(items.map((i) => i.id).sort(), ['bubbly', 'gorgeous']);
   assert.equal(items.find((i) => i.id === 'bubbly').st, null);
 
@@ -44,16 +45,20 @@ test('DynamoDB 저장소: 등록, 상태 변경, 세션, 삭제', async () => {
   await service.patchItem(store, OWNER, 'gorgeous', { off: true, pending: false });
   assert.equal((await service.getState(store, OWNER)).items.find((i) => i.id === 'gorgeous').off, true);
 
-  // 학습 상태를 바꾼 뒤 같은 항목을 다시 등록해도 상태가 남는다
-  await service.addItems(store, { picked_by: 'user', items: [{ text: 'bubbly', meaning_ko: 'x', examples: [{ en: 'Some [bubbly]?' }] }] }, 2000);
+  // 학습 상태를 바꾼 뒤 같은 뜻으로 다시 등록해도 상태가 남고 예문이 합쳐진다
+  await service.addItems(store, { picked_by: 'user', items: [{ text: 'bubbly', meaning_ko: '샴페인', examples: [{ en: 'Some [bubbly]?' }] }] }, 2000);
   const merged = (await service.getState(store, OWNER)).items.find((i) => i.id === 'bubbly');
   assert.deepEqual(merged.st, st); assert.equal(merged.examples.length, 2);
+  // 다른 뜻은 같은 표현의 새 뜻이 된다
+  const r2 = await service.addItems(store, { picked_by: 'user', items: [{ text: 'bubbly', meaning_ko: '쾌활한', examples: [{ en: 'She is so [bubbly].' }] }] }, 3000);
+  assert.deepEqual([r2.results[0].id, r2.results[0].status], ['bubbly~2', 'new_sense']);
+  await service.deleteItem(store, 'bubbly~2');
 
   for (const t of [1794717536455, 1794717600000, 1794717700000]) await service.putSession(store, OWNER, 's' + t, { startedAt: t, ev: [{ i: 'bubbly', t: 'intro', at: t }] });
   assert.deepEqual((await store.listSessions(2)).map((s) => s.startedAt), [1794717700000, 1794717600000]);
 
   await service.deleteItem(store, 'gorgeous');
-  assert.deepEqual((await store.listItems()).map((i) => i.id), ['bubbly']);
+  assert.deepEqual((await cat.loadUnits(store)).map((i) => i.id), ['bubbly']);
   await service.deleteItem(store, 'bubbly');
 });
 
@@ -143,4 +148,35 @@ test('DynamoDB 사람별 진도·초대 코드: 한 번만 쓰고, 진도는 섞
   await users.revokeUser(store, friend.uid, 3000);
   assert.equal(await users.resolveApp(store, { appKey: 'k', mcpKey: 'm' }, 'Bearer ' + a.token), null);
   await service.deleteItem(store, 'spill-the-beans');
+});
+
+test('옮기기 스크립트: ITEM → EXPR, 주인 진도는 사람별 행으로, 두 번 돌려도 같고, 화면은 그대로', async () => {
+  const { PutCommand } = await import('@aws-sdk/lib-dynamodb');
+  const { DynamoDBDocumentClient } = await import('@aws-sdk/lib-dynamodb');
+  const { migrate } = await import('../scripts/migrate-senses.mjs');
+  const name = 'rewind-migrate-test';
+  await client.send(new CreateTableCommand({
+    TableName: name, BillingMode: 'PROVISIONED', ProvisionedThroughput: { ReadCapacityUnits: 5, WriteCapacityUnits: 5 },
+    AttributeDefinitions: [{ AttributeName: 'pk', AttributeType: 'S' }, { AttributeName: 'sk', AttributeType: 'S' }],
+    KeySchema: [{ AttributeName: 'pk', KeyType: 'HASH' }, { AttributeName: 'sk', KeyType: 'RANGE' }],
+  }));
+  await waitUntilTableExists({ client, maxWaitTime: 10, minDelay: 0.05, maxDelay: 0.2 }, { TableName: name });
+  const db = DynamoDBDocumentClient.from(client), st = (h) => ({ h, last: 1, intro: 1, seen: 1, right: 1, wrong: 0, recent: '1', sq: 0 });
+  const legacy = (id, extra) => ({ id, kind: 'word', text: id, meaning_ko: id + ' 뜻', examples: [{ en: `[${id}]!` }], synonyms: [], antonyms: [], wrong_meanings_ko: [], wrong_fills: [], pending: false, off: false, createdAt: 1, st: null, ...extra });
+  for (const it of [legacy('alpha', { st: st(2) }), legacy('beta', { st: st(3) }), legacy('gamma', { off: true })]) await db.send(new PutCommand({ TableName: name, Item: { pk: 'ITEM', sk: it.id, doc: it } }));
+  await db.send(new PutCommand({ TableName: name, Item: { pk: 'ST#owner', sk: 'beta', st: st(9) } })); // 이미 행이 있으면 행이 이긴다
+  const store = createDynamoStore({ tableName: name, client }), quiet = () => {};
+  const dry = await migrate(store, { log: quiet });
+  assert.deepEqual([dry.plan.newExpr, dry.plan.progressRows, dry.plan.progressKept], [3, 1, 1]);
+  assert.equal((await store.listDocs('EXPR')).length, 0, '미리보기는 아무것도 쓰지 않는다');
+  const r = await migrate(store, { apply: true, log: quiet });
+  assert.equal(r.same, true); assert.equal(r.after, 3);
+  const exprs = await store.listDocs('EXPR');
+  assert.deepEqual(exprs.map((e) => e.id).sort(), ['alpha', 'beta', 'gamma']);
+  assert.ok(exprs.every((e) => e.senses.every((x) => !('st' in x))), '뜻 문서에 진도를 남기지 않는다');
+  assert.deepEqual((await store.getStateRow('owner', 'alpha')).st, st(2));
+  assert.deepEqual((await store.getStateRow('owner', 'beta')).st, st(9));
+  assert.equal((await store.listItems()).length, 3, 'ITEM 행은 남는다');
+  const again = await migrate(store, { apply: true, log: quiet });
+  assert.deepEqual([again.plan.newExpr, again.plan.progressRows, again.same], [0, 0, true]);
 });

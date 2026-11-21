@@ -185,3 +185,6 @@ h2{font-size:18px}
 .sess{display:flex;flex-direction:column}
 .sess div{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:14px;font-variant-numeric:tabular-nums}
 .sess div:first-child{border-top:0;padding-top:0} .sess div span:last-child{color:var(--muted);font-size:13px}
+
+/* 뜻이 여럿인 표현: 몇 번째 뜻인지 */
+.sense-no{font-family:var(--font-ui);font-size:.55em;font-weight:600;vertical-align:middle;color:var(--accent);border:1px solid currentColor;border-radius:99px;padding:1px 7px;margin-left:6px;white-space:nowrap;letter-spacing:0}

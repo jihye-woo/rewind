@@ -103,13 +103,19 @@ function normalizePayload(raw, now) {
       wrong_meanings_ko: uniq(arr(it.wrong_meanings_ko).map(str)).slice(0, 6),
       wrong_fills: uniq(arr(it.wrong_fills).map(str)).slice(0, 6),
       priority: !!it.priority, src: isrc, createdAt: now || Date.now(), st: null,
+      register: str(it.register).toLowerCase().slice(0, 20), forms: uniq(arr(it.forms).map(normText)).slice(0, 12),
+      sense_id: str(it.sense_id), new_sense: !!it.new_sense,
       // 사용자가 직접 지목한 항목만 바로 학습에 들어간다. 그 밖은 '후보'로 꺼진 채 들어온다
       pending: (str(it.picked_by).toLowerCase() || pickedAll) !== 'user', off: (str(it.picked_by).toLowerCase() || pickedAll) !== 'user'
     });
   });
-  // 같은 호출 안의 중복은 뒤의 것을 앞에 합친다
+  // 같은 호출 안의 중복(같은 표현, 같은 뜻)은 뒤의 것을 앞에 합친다. 뜻이 다르면 따로 둔다
   var byId = {}, merged = [];
-  out.forEach(function (it) { if (byId[it.id]) { var m = mergeItem(byId[it.id], it); merged[merged.indexOf(byId[it.id])] = m; byId[it.id] = m; } else { byId[it.id] = it; merged.push(it); } });
+  out.forEach(function (it) {
+    var k = it.id + '|' + (it.sense_id || it.meaning_ko.toLowerCase().replace(/[\s.,·~…'"()\[\]-]/g, ''));
+    if (byId[k]) { var m = mergeItem(byId[k], it); m.register = byId[k].register || it.register; m.forms = uniq(byId[k].forms.concat(it.forms)); m.sense_id = byId[k].sense_id; m.new_sense = byId[k].new_sense; merged[merged.indexOf(byId[k])] = m; byId[k] = m; }
+    else { byId[k] = it; merged.push(it); }
+  });
   return { items: merged, errors: errors, warnings: warnings };
 }
 
@@ -187,7 +193,8 @@ function pickExample(it, n) { var ex = arr(it.examples); return ex.length ? ex[(
 
 function buildQuiz(it, type, items, rnd) {
   rnd = rnd || Math.random;
-  var others = items.filter(function (x) { return x.id !== it.id; });
+  // 같은 표현의 다른 뜻은 오답 보기로 쓰지 않는다 (docs/GOAL.md 3절)
+  var others = items.filter(function (x) { return x.id !== it.id && !(it.exprId && x.exprId === it.exprId); });
   var same = function (a, b) { return String(a).toLowerCase() === String(b).toLowerCase(); };
   function pack(correct, wrong) {
     wrong = uniq(wrong).filter(function (w) { return !same(w, correct); });
