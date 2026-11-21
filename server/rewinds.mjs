@@ -38,6 +38,8 @@ const GAP_KO = {
   no_trends: '요즘 활용 문장이 없다',
   stale_trends: `요즘 활용 문장이 ${RULES.trendDays}일보다 오래됐다`,
   overexposed_examples: `${RULES.overexposed}번 넘게 보여 준 예문이 있다 (같은 상황의 새 문장으로 바꾼다)`,
+  wrapped_expression: '강조어가 붙은 조합이다 (핵심 표현으로 합치고 이 조합은 자주 같이 쓰는 말로)',
+  has_wrapped_duplicates: '강조어가 붙은 같은 말이 따로 등록돼 있다 (이쪽으로 합친다)',
   no_ipa: '단어인데 발음기호가 없다',
 };
 
@@ -61,8 +63,10 @@ export async function exposureCounts(store) {
   return counts;
 }
 
-export function diagnose(unit, counts, now) {
+export function diagnose(unit, counts, now, overlap = {}) {
   const ex = unit.examples || [], gaps = [];
+  if (overlap.core) gaps.push('wrapped_expression');
+  if (overlap.wrappers && overlap.wrappers.length) gaps.push('has_wrapped_duplicates');
   if (!unit.register) gaps.push('no_register');
   if (ex.length < RULES.minExamples) gaps.push('few_examples');
   if (ex.some((e) => !Core.exFill(e.en))) gaps.push('unmarked_examples');
@@ -79,7 +83,7 @@ export function diagnose(unit, counts, now) {
   if (over.length) gaps.push('overexposed_examples');
   if (unit.kind === 'word' && !unit.ipa) gaps.push('no_ipa');
   // 너무 많이 본 예문과 비어 있는 핵심 칸을 먼저 고친다
-  const weight = { overexposed_examples: 3, few_examples: 2, no_contrasts: 2, no_trends: 2, stale_trends: 2, no_register: 2 };
+  const weight = { wrapped_expression: 4, has_wrapped_duplicates: 4, overexposed_examples: 3, few_examples: 2, no_contrasts: 2, no_trends: 2, stale_trends: 2, no_register: 2 };
   const score = gaps.reduce((a, g) => a + (weight[g] || 1), 0);
   return { gaps, over, score };
 }
@@ -87,15 +91,23 @@ export function diagnose(unit, counts, now) {
 /** 고칠 뜻을 우선순위대로. 같은 점수면 오래 손대지 않은 것부터 */
 export async function targets(store, { limit = 10, ids } = {}, now = Date.now()) {
   const [units, counts] = await Promise.all([cat.loadUnits(store), exposureCounts(store)]);
+  // 강조어 조합 ↔ 핵심 표현
+  const known = new Set(units.map((u) => Core.normText(u.text)));
+  const exprByText = new Map(units.map((u) => [Core.normText(u.text), u.exprId]));
+  const overlapOf = (u) => {
+    const core = cat.coreOf(u.text, known);
+    const wrappers = [...new Set(units.filter((x) => x.exprId !== u.exprId && cat.coreOf(x.text, known) === Core.normText(u.text)).map((x) => x.exprId))];
+    return { core: core && core !== Core.normText(u.text) ? core : null, coreExprId: core ? exprByText.get(core) || null : null, wrappers };
+  };
   const pool = ids && ids.length ? units.filter((u) => ids.includes(u.id) || ids.includes(u.exprId)) : units.filter((u) => !u.pending);
-  const diag = pool.map((u) => ({ u, d: diagnose(u, counts, now) })).filter((x) => x.d.score > 0)
+  const diag = pool.map((u) => { const o = overlapOf(u); return { u, o, d: diagnose(u, counts, now, o) }; }).filter((x) => x.d.score > 0)
     .sort((a, b) => b.d.score - a.d.score || (a.u.refinedAt || 0) - (b.u.refinedAt || 0) || (a.u.createdAt || 0) - (b.u.createdAt || 0));
   const n = Math.max(1, Math.min(RULES.maxTargets, Number(limit) || 10));
   const byExpr = new Map(); units.forEach((u) => { if (!byExpr.has(u.exprId)) byExpr.set(u.exprId, []); byExpr.get(u.exprId).push(u); });
   return {
     today: kstDate(now),
     total_with_gaps: diag.length,
-    targets: diag.slice(0, n).map(({ u, d }) => ({
+    targets: diag.slice(0, n).map(({ u, d, o }) => ({
       sense_id: u.id, expr_id: u.exprId, text: u.text, kind: u.kind, ipa: u.ipa || '', forms: u.forms || [],
       sense: `${u.senseNo}/${u.senseCount}`,
       other_senses: byExpr.get(u.exprId).filter((x) => x.id !== u.id).map((x) => ({ sense_id: x.id, meaning_ko: x.meaning_ko })),
@@ -107,6 +119,8 @@ export async function targets(store, { limit = 10, ids } = {}, now = Date.now())
         source: u.src || null,
       },
       gaps: d.gaps.map((g) => ({ code: g, ko: GAP_KO[g] })),
+      ...(o.core ? { core: { text: o.core, expr_id: o.coreExprId, senses: o.coreExprId ? byExpr.get(o.coreExprId).map((x) => ({ sense_id: x.id, meaning_ko: x.meaning_ko })) : [] } } : {}),
+      ...(o.wrappers.length ? { wrapped_duplicates: o.wrappers.map((id) => ({ expr_id: id, senses: byExpr.get(id).map((x) => ({ sense_id: x.id, text: x.text, meaning_ko: x.meaning_ko })) })) } : {}),
       overexposed: d.over,
     })),
   };
@@ -174,7 +188,10 @@ async function mergeSense(store, srcId, tgtId, runId, now) {
   tgtExpr.senses = tgtExpr.senses.map((x) => (x.id === tgt.id ? keep : x));
   if (srcExpr !== tgtExpr) {
     const forms = new Set([...(tgtExpr.forms || []), ...(srcExpr.forms || [])]);
-    if (Core.normText(srcExpr.text) !== Core.normText(tgtExpr.text)) forms.add(Core.normText(srcExpr.text));
+    const wrapped = cat.coreOf(srcExpr.text, new Set([Core.normText(tgtExpr.text)])) === Core.normText(tgtExpr.text);
+    if (wrapped) { // so capable → capable: 활용형이 아니라 자주 같이 쓰는 말로 남긴다
+      keep.collocations = [...new Set([srcExpr.text, ...(keep.collocations || [])])].slice(0, 8);
+    } else if (Core.normText(srcExpr.text) !== Core.normText(tgtExpr.text)) forms.add(Core.normText(srcExpr.text));
     tgtExpr.forms = [...forms].slice(0, 12);
     tgtExpr.ipa = tgtExpr.ipa || srcExpr.ipa;
   }

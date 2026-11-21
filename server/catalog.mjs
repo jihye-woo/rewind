@@ -100,3 +100,19 @@ export function formIndex(exprs) {
   }
   return m;
 }
+
+/**
+ * 강조어가 앞에 붙은 조합(so capable)의 핵심 표현(capable). 아니면 null.
+ * 강조어를 떼고 남은 것이 한 단어이거나 이미 있는 표현일 때만 그렇게 본다(too good to be true 같은 관용구는 건드리지 않는다).
+ * 관사는 강조어로 보지 않는다: a cross word 와 cross word(낱말 퍼즐)는 다른 말이다.
+ */
+export const INTENSIFIERS = new Set(['so', 'very', 'really', 'too', 'super', 'pretty', 'quite', 'extremely', 'highly', 'absolutely', 'totally', 'completely', 'incredibly', 'such']);
+export function coreOf(text, known = new Set()) {
+  const w = Core.normText(text).split(' ').filter(Boolean);
+  let i = 0;
+  while (i < w.length - 1 && INTENSIFIERS.has(w[i])) i++;
+  if (!i) return null;
+  const rest = w.slice(i).join(' ');
+  return w.length - i === 1 || known.has(rest) ? rest : null;
+}
+

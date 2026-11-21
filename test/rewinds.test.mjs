@@ -125,3 +125,38 @@ test('MCP: 대상 보기는 누구나, 고치기·되돌리기는 주인만', as
   assert.match(ok.content[0].text, /1개 고침/);
   assert.equal((await cat.getUnit(store, 'gorgeous')).note, '주인이 고침');
 });
+
+test('강조어 조합: 핵심 표현 판별, 등록 경고, 진단, 합치면 자주 같이 쓰는 말로', async () => {
+  // 판별
+  assert.equal(cat.coreOf('so capable'), 'capable');
+  assert.equal(cat.coreOf('really really tired'), 'tired');
+  assert.equal(cat.coreOf('too good to be true'), null, '남는 게 여러 단어이고 등록된 표현도 아니면 관용구로 둔다');
+  assert.equal(cat.coreOf('too good to be true', new Set(['good to be true'])), 'good to be true');
+  assert.equal(cat.coreOf('a cross word'), null, '관사는 강조어가 아니다');
+  assert.equal(cat.coreOf('capable'), null);
+  // 등록: 조합만 있을 때, 핵심을 나중에 넣을 때 양쪽 다 경고
+  const store = createMemoryStore();
+  let r = await service.addItems(store, { picked_by: 'user', items: [{ text: 'so capable', meaning_ko: '정말 유능한', examples: [{ en: 'She is [so capable].' }] }] }, NOW);
+  assert.match(r.warnings.join(' '), /핵심 표현 "capable"을 등록하고/);
+  await service.patchItem(store, OWNER, 'so-capable', { st: st(7, 3) });
+  // 진단: 조합 쪽에 wrapped_expression, 핵심이 아직 없음
+  let t = await rewinds.targets(store, {}, NOW);
+  const w = t.targets.find((x) => x.sense_id === 'so-capable');
+  assert.ok(w.gaps.some((g) => g.code === 'wrapped_expression')); assert.deepEqual(w.core, { text: 'capable', expr_id: null, senses: [] });
+  assert.equal(t.targets[0].sense_id, 'so-capable', '먼저 고친다');
+  r = await service.addItems(store, { picked_by: 'user', items: [{ text: 'capable', meaning_ko: '유능한', examples: [{ en: 'He is [capable].' }] }] }, NOW);
+  assert.match(r.warnings.join(' '), /강조어가 붙은 표현\(so capable \[so-capable\]\)/);
+  t = await rewinds.targets(store, {}, NOW);
+  assert.deepEqual(t.targets.find((x) => x.sense_id === 'so-capable').core.senses, [{ sense_id: 'capable', meaning_ko: '유능한' }]);
+  assert.deepEqual(t.targets.find((x) => x.sense_id === 'capable').wrapped_duplicates.map((x) => x.expr_id), ['so-capable']);
+  // 합치기: so capable 은 활용형이 아니라 자주 같이 쓰는 말로, 진도는 많이 본 쪽
+  const m = await rewinds.apply(store, { updates: [{ sense_id: 'so-capable', merge_into: 'capable' }] }, NOW);
+  assert.equal(m.results[0].merged_into, 'capable');
+  const units = await cat.loadUnits(store);
+  assert.deepEqual(units.map((u) => u.id), ['capable']);
+  assert.ok(units[0].collocations.includes('so capable')); assert.ok(!units[0].forms.includes('so capable'));
+  assert.equal(units[0].examples.length, 2);
+  assert.equal((await service.getState(store, OWNER)).items[0].st.seen, 7);
+  await rewinds.undo(store, { run_id: m.run_id }, NOW + 1);
+  assert.deepEqual((await cat.loadUnits(store)).map((u) => u.id).sort(), ['capable', 'so-capable']);
+});

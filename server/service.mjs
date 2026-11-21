@@ -30,7 +30,9 @@ function stateOf(item) {
 export async function addItems(store, payload, now = Date.now()) {
   const n = Core.normalizePayload(payload, now);
   const results = [], saved = [];
-  const index = cat.formIndex(await cat.loadExprs(store));
+  const exprsNow = await cat.loadExprs(store);
+  const index = cat.formIndex(exprsNow);
+  const known = new Set(exprsNow.map((e) => Core.normText(e.text)));
   for (const inc of n.items) {
     if (!ITEM_ID.test(inc.id)) { n.errors.push(`${inc.text}: 항목 ID를 만들 수 없는 이름입니다.`); continue; }
     const exprId = index.get(Core.normText(inc.text)) || inc.forms.map((f) => index.get(f)).find(Boolean) || inc.id;
@@ -63,6 +65,14 @@ export async function addItems(store, payload, now = Date.now()) {
       } else status = inc.pending ? 'candidate' : 'created';
       expr.senses.push(sense);
     }
+    // 강조어 조합과 그 핵심 표현이 따로 생기면 알려 준다 (so capable ↔ capable)
+    const core = cat.coreOf(expr.text, known);
+    if (core && core !== Core.normText(expr.text)) {
+      n.warnings.push(`${expr.text}: 강조어가 붙은 조합입니다. 핵심 표현 "${core}"${known.has(core) ? '이 이미 있으니 그 뜻에 예문·자주 같이 쓰는 말로 넣는 편이 좋습니다(rewinds_apply 의 merge_into 로 합칠 수 있습니다)' : '을 등록하고 이 조합은 자주 같이 쓰는 말로 넣는 편이 좋습니다'}.`);
+    }
+    const wrappers = exprsNow.filter((e) => e.id !== expr.id && cat.coreOf(e.text, known) === Core.normText(expr.text));
+    if (wrappers.length) n.warnings.push(`${expr.text}: 같은 말에 강조어가 붙은 표현(${wrappers.map((e) => e.text + ' [' + e.id + ']').join(', ')})이 따로 있습니다. rewinds_apply 의 merge_into 로 이쪽에 합치세요.`);
+    known.add(Core.normText(expr.text));
     await cat.saveExpr(store, expr);
     index.set(Core.normText(expr.text), expr.id); expr.forms.forEach((f) => index.has(f) || index.set(f, expr.id));
     const unit = cat.unitsOf(expr).find((u) => u.id === sense.id);
