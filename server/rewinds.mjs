@@ -19,12 +19,12 @@ import * as cat from './catalog.mjs';
 import { InputError } from './service.mjs';
 
 export const RULES = {
-  minExamples: 8, maxExamples: 12, overexposed: 100, trendDays: 90, minWrong: 3, minTrends: 2, placeholderRepeat: 3,
+  minExamples: 8, maxExamples: 12, overexposed: 100, trendDays: 90, minWrong: 3, minTrends: 2, placeholderRepeat: 3, maxSensesPerUrl: 2, maxNewsyPerRun: 5,
   maxUpdates: 20, maxTargets: 15,
 };
 const DAY = 86400000;
-/** 활용 문장을 실제 뉴스에 연결해야 하는 톤 */
-const NEWSY = new Set(['news', 'finance', 'business', 'tech', 'economy', 'politics']);
+/** 활용 문장을 실제 뉴스에 연결해야 하는 톤. business(업무 대화)는 요즘 업무 장면으로 쓰면 되므로 넣지 않는다 */
+export const NEWSY = new Set(['news', 'finance', 'tech', 'economy', 'politics']);
 /** 한국 시간 기준 날짜 (YYYY-MM-DD). 서버(Lambda)는 UTC 로 돈다 */
 export const kstDate = (ms) => new Date(ms + 9 * 3600000).toISOString().slice(0, 10);
 
@@ -40,7 +40,9 @@ const GAP_KO = {
   no_trends: '요즘 활용 문장이 없다',
   few_trends: `요즘 활용 문장이 ${RULES.minTrends}개보다 적다 (2~3개)`,
   untranslated_trends: '한국어 번역이 없는 요즘 활용 문장이 있다 (ko 는 그 문장의 번역)',
-  unsourced_trends: '뉴스·금융·비즈니스·기술 톤인데 출처(source)나 링크(url)가 없는 활용 문장이 있다 (실제 뉴스를 검색해서 연결한다)',
+  unsourced_trends: '뉴스·금융·기술·경제·정치 톤인데 출처(source)나 링크(url)가 없는 활용 문장이 있다 (실제 뉴스를 검색해서 연결한다)',
+  reused_source: `같은 기사 링크를 ${RULES.maxSensesPerUrl}개보다 많은 뜻에 돌려쓴 활용 문장이 있다 (표현마다 그 표현이 실제로 어울리는 다른 기사를 찾는다)`,
+  generic_topic: `여러 뜻에 똑같이 쓴 주제(topic)가 있다 (그 기사나 장면의 구체적인 내용으로)`,
   placeholder_trends: '활용 문장의 한국어 칸에 여러 뜻에 똑같이 들어간 문구가 있다 (자리 채우기가 아니라 그 문장의 번역을 쓴다)',
   weak_contrasts: '예문이나 번역이 빠진 뉘앙스 대비가 있다 (대비마다 그 표현이 맞는 문장과 번역)',
   stale_trends: `요즘 활용 문장이 ${RULES.trendDays}일보다 오래됐다`,
@@ -90,6 +92,8 @@ export function diagnose(unit, counts, now, overlap = {}) {
     if (trends.some((t) => !t.ko)) gaps.push('untranslated_trends');
     if (NEWSY.has(unit.register || '') && trends.some((t) => !t.source || !t.url)) gaps.push('unsourced_trends');
     if (overlap.placeholders && trends.some((t) => t.ko && overlap.placeholders.has(t.ko.trim()))) gaps.push('placeholder_trends');
+    if (overlap.reusedUrls && trends.some((t) => t.url && overlap.reusedUrls.has(t.url))) gaps.push('reused_source');
+    if (overlap.genericTopics && trends.some((t) => t.topic && overlap.genericTopics.has(t.topic.trim()))) gaps.push('generic_topic');
     if (trends.every((t) => !t.date || now - Date.parse(t.date) > RULES.trendDays * DAY)) gaps.push('stale_trends');
   }
   const over = ex.map((e) => ({ key: Core.exKey(e.en), en: e.en, shown: counts.get(unit.id + '|' + Core.exKey(e.en)) || 0 }))
@@ -97,7 +101,7 @@ export function diagnose(unit, counts, now, overlap = {}) {
   if (over.length) gaps.push('overexposed_examples');
   if (unit.kind === 'word' && !unit.ipa) gaps.push('no_ipa');
   // 너무 많이 본 예문과 비어 있는 핵심 칸을 먼저 고친다
-  const weight = { wrapped_expression: 4, has_wrapped_duplicates: 4, overexposed_examples: 3, placeholder_trends: 2, unsourced_trends: 2, few_examples: 2, no_contrasts: 2, no_trends: 2, stale_trends: 2, no_register: 2 };
+  const weight = { wrapped_expression: 4, has_wrapped_duplicates: 4, overexposed_examples: 3, placeholder_trends: 2, unsourced_trends: 2, reused_source: 2, few_examples: 2, no_contrasts: 2, no_trends: 2, stale_trends: 2, no_register: 2 };
   const score = gaps.reduce((a, g) => a + (weight[g] || 1), 0);
   return { gaps, over, score };
 }
@@ -112,20 +116,33 @@ export async function targets(store, { limit = 10, ids } = {}, now = Date.now())
   const koSenses = new Map();
   units.forEach((u) => new Set((u.trends || []).map((t) => (t.ko || '').trim()).filter(Boolean)).forEach((ko) => koSenses.set(ko, (koSenses.get(ko) || 0) + 1)));
   const placeholders = new Set([...koSenses].filter(([, n]) => n >= RULES.placeholderRepeat).map(([ko]) => ko));
+  // 같은 기사 링크·같은 주제를 여러 뜻에 돌려쓴 것
+  const sensesBy = (key) => { const m = new Map(); units.forEach((u) => new Set((u.trends || []).map(key).filter(Boolean)).forEach((k) => m.set(k, (m.get(k) || 0) + 1))); return m; };
+  const reusedUrls = new Set([...sensesBy((t) => t.url)].filter(([, n]) => n > RULES.maxSensesPerUrl).map(([k]) => k));
+  const genericTopics = new Set([...sensesBy((t) => (t.topic || '').trim())].filter(([, n]) => n >= RULES.placeholderRepeat).map(([k]) => k));
   const overlapOf = (u) => {
     const core = cat.coreOf(u.text, known);
     const wrappers = [...new Set(units.filter((x) => x.exprId !== u.exprId && cat.coreOf(x.text, known) === Core.normText(u.text)).map((x) => x.exprId))];
-    return { core: core && core !== Core.normText(u.text) ? core : null, coreExprId: core ? exprByText.get(core) || null : null, wrappers, placeholders };
+    return { core: core && core !== Core.normText(u.text) ? core : null, coreExprId: core ? exprByText.get(core) || null : null, wrappers, placeholders, reusedUrls, genericTopics };
   };
   const pool = ids && ids.length ? units.filter((u) => ids.includes(u.id) || ids.includes(u.exprId)) : units.filter((u) => !u.pending);
   const diag = pool.map((u) => { const o = overlapOf(u); return { u, o, d: diagnose(u, counts, now, o) }; }).filter((x) => x.d.score > 0)
     .sort((a, b) => b.d.score - a.d.score || (a.u.refinedAt || 0) - (b.u.refinedAt || 0) || (a.u.createdAt || 0) - (b.u.createdAt || 0));
   const n = Math.max(1, Math.min(RULES.maxTargets, Number(limit) || 10));
+  // 뉴스 톤은 표현마다 실제 기사를 찾아야 하므로 한 번에 몇 개만. 남는 자리는 다른 톤으로 채운다
+  const picked = [];
+  let newsy = 0;
+  for (const x of diag) {
+    if (picked.length >= n) break;
+    if (NEWSY.has(x.u.register || '')) { if (newsy >= RULES.maxNewsyPerRun) continue; newsy++; }
+    picked.push(x);
+  }
   const byExpr = new Map(); units.forEach((u) => { if (!byExpr.has(u.exprId)) byExpr.set(u.exprId, []); byExpr.get(u.exprId).push(u); });
   return {
     today: kstDate(now),
     total_with_gaps: diag.length,
-    targets: diag.slice(0, n).map(({ u, d, o }) => ({
+    newsy_this_run: newsy,
+    targets: picked.map(({ u, d, o }) => ({
       sense_id: u.id, expr_id: u.exprId, text: u.text, kind: u.kind, ipa: u.ipa || '', forms: u.forms || [],
       sense: `${u.senseNo}/${u.senseCount}`,
       other_senses: byExpr.get(u.exprId).filter((x) => x.id !== u.id).map((x) => ({ sense_id: x.id, meaning_ko: x.meaning_ko })),

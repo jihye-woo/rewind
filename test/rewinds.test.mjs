@@ -182,3 +182,23 @@ test('엄격한 기준: 활용 문장 개수·번역·출처, 자리 채우기 �
   assert.deepEqual(g('delta'), [], '일상 톤은 출처가 없어도 된다');
 });
 
+test('돌려쓴 기사·뭉뚱그린 주제는 다시, business 는 출처 없이, 뉴스 톤은 한 번에 5개까지', async () => {
+  const store = createMemoryStore();
+  const base = (text, register) => ({ text, kind: 'word', ipa: '/x/', meaning_ko: text + ' 뜻', register, examples: Array.from({ length: 8 }, (_, i) => ({ en: `${i} [${text}].`, ko: '번역' })), wrong_meanings_ko: ['a', 'b', 'c'], wrong_fills: ['d', 'e', 'f'] });
+  const words = ['n1', 'n2', 'n3', 'n4', 'n5', 'n6', 'n7', 'b1', 'c1'];
+  await service.addItems(store, { picked_by: 'user', items: words.map((w) => base(w, w[0] === 'n' ? 'news' : w[0] === 'b' ? 'business' : 'casual')) }, NOW);
+  const contrast = [{ text: 'y', when_ko: '언제', example: { en: 'Y.', ko: 'Y.' } }];
+  const same = (w, i) => ({ en: `S${i} [${w}].`, ko: `${w} 번역 ${i}`, topic: '업무·시사 표현', source: 'Reuters', url: 'https://r.com/same', date: '2026-11-20' });
+  const own = (w, i) => ({ en: `O${i} [${w}].`, ko: `${w} 문장 ${i}`, topic: `${w} 기사 ${i}`, source: 'AP', url: `https://ap.org/${w}/${i}`, date: '2026-11-20' });
+  await rewinds.apply(store, { updates: words.map((w) => ({ sense_id: w, set: { collocations: ['x'], contrasts: contrast,
+    trends: ['n1', 'n2', 'n3'].includes(w) ? [same(w, 1), same(w, 2)] : w === 'b1' ? [{ en: 'B1 [b1].', ko: '회의에서', topic: '분기 실적 회의' }, { en: 'B2 [b1].', ko: '메일에서', topic: '고객 메일 답장' }] : [own(w, 1), own(w, 2)] } })) }, NOW);
+  const t = await rewinds.targets(store, { limit: 15 }, NOW), g = (id) => ((t.targets.find((x) => x.sense_id === id) || { gaps: [] }).gaps.map((x) => x.code).sort());
+  assert.deepEqual(g('n1'), ['generic_topic', 'reused_source']);
+  assert.deepEqual(g('n4'), [], '자기 기사를 붙인 뉴스 톤은 통과');
+  assert.deepEqual(g('b1'), [], 'business 는 출처 없이 업무 장면이면 된다');
+  // 뉴스 톤 7개를 모두 모자라게 만들면 한 번에 5개까지만 꺼낸다
+  await rewinds.apply(store, { updates: words.filter((w) => w[0] === 'n').map((w) => ({ sense_id: w, set: { trends: [same(w, 1)] } })) }, NOW);
+  const t2 = await rewinds.targets(store, { limit: 15 }, NOW);
+  assert.equal(t2.newsy_this_run, 5); assert.equal(t2.targets.filter((x) => x.sense_id[0] === 'n').length, 5);
+});
+
