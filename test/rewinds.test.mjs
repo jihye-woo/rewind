@@ -160,3 +160,25 @@ test('강조어 조합: 핵심 표현 판별, 등록 경고, 진단, 합치면 �
   await rewinds.undo(store, { run_id: m.run_id }, NOW + 1);
   assert.deepEqual((await cat.loadUnits(store)).map((u) => u.id).sort(), ['capable', 'so-capable']);
 });
+
+test('엄격한 기준: 활용 문장 개수·번역·출처, 자리 채우기 문구, 대비 예문', async () => {
+  const store = createMemoryStore();
+  const full = (text, register, trends, contrasts) => ({ text, kind: 'word', ipa: '/x/', meaning_ko: text + ' 뜻', register,
+    examples: Array.from({ length: 8 }, (_, i) => ({ en: `${i} [${text}].`, ko: '번역' })), wrong_meanings_ko: ['a', 'b', 'c'], wrong_fills: ['d', 'e', 'f'], collocations: ['x'] });
+  await service.addItems(store, { picked_by: 'user', items: ['alpha', 'beta', 'gamma', 'delta'].map((t) => full(t, t === 'delta' ? 'casual' : 'news')) }, NOW);
+  const filler = '최근 업무·뉴스 맥락에서 활용할 수 있는 예문';
+  const good = [{ en: 'A [x].', ko: '번역 1', topic: 't', source: 'Reuters', url: 'https://r.com/1', date: '2026-11-20' }, { en: 'B [x].', ko: '번역 2', topic: 't', source: 'AP', url: 'https://ap.org/2', date: '2026-11-21' }];
+  const contrast = [{ text: 'y', when_ko: '언제', example: { en: 'Y here.', ko: '여기 Y.' } }];
+  await rewinds.apply(store, { updates: [
+    { sense_id: 'alpha', set: { collocations: ['x'], contrasts: contrast, trends: [{ en: 'A [alpha].', ko: filler, topic: '일반' }] } },
+    { sense_id: 'beta', set: { collocations: ['x'], contrasts: [{ text: 'y', when_ko: '언제' }], trends: [{ en: 'B [beta].', ko: filler }, { en: 'C [beta].', ko: '' }] } },
+    { sense_id: 'gamma', set: { collocations: ['x'], contrasts: contrast, trends: [{ en: 'G [gamma].', ko: filler }, ...good] } },
+    { sense_id: 'delta', set: { collocations: ['x'], contrasts: contrast, trends: [{ en: 'I [delta] daily.', ko: '나는 매일 해.', topic: '일상' }, { en: 'We [delta] too.', ko: '우리도.', topic: '일상' }] } },
+  ] }, NOW);
+  const t = await rewinds.targets(store, { limit: 15 }, NOW), g = (id) => (t.targets.find((x) => x.sense_id === id) || { gaps: [] }).gaps.map((x) => x.code);
+  assert.deepEqual(g('alpha').sort(), ['few_trends', 'placeholder_trends', 'unsourced_trends']);
+  assert.deepEqual(g('beta').sort(), ['placeholder_trends', 'unsourced_trends', 'untranslated_trends', 'weak_contrasts']);
+  assert.deepEqual(g('gamma').sort(), ['placeholder_trends', 'unsourced_trends'], '좋은 문장이 있어도 자리 채우기 문장이 섞이면 다시');
+  assert.deepEqual(g('delta'), [], '일상 톤은 출처가 없어도 된다');
+});
+
