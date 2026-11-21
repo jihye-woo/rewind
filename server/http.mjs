@@ -4,7 +4,9 @@
  *
  *   GET  /                        앱 화면 (인증 없음. 화면 자체에는 데이터가 없다)
  *
- *   Authorization: Bearer <앱 키 또는 기기 열쇠>. 틀린 열쇠는 401.
+ *   Authorization: Bearer <앱 키 또는 기기 열쇠>, 또는 같은 값을 담은 로그인 쿠키(rewind_key). 틀린 열쇠는 401.
+ *   POST /api/session(Bearer 로 부름)이 쿠키를 내려 주고, POST /api/logout 이 지운다. 초대 코드를 쓰면 바로 쿠키가 생긴다.
+ *   쿠키는 HttpOnly; Secure; SameSite=Strict; Path=<서비스 경로>; Max-Age=400일. 화면의 JS 는 키를 들고 있지 않는다.
  *   헤더가 없으면 손님이다. publicRead 이면 주인의 화면(항목·진도·세션)을 읽기 전용으로 보여 주고, 아니면 401.
  *   손님의 그 밖의 요청(쓰기·백업·관리)은 모두 401.
  *   GET  /api/me                  나는 누구인가 (role: owner | friend | guest)      누구나
@@ -43,6 +45,25 @@ const json = (status, body, extra = {}) => ({
 });
 const empty = (status, extra = {}) => ({ status, headers: { 'cache-control': 'no-store', ...SECURITY, ...extra }, body: '' });
 
+const COOKIE = 'rewind_key';
+const COOKIE_MAX_AGE = 400 * 86400; // 브라우저들이 받아 주는 최대치(400일)
+
+function cookiePath(config) { return (config.basePath || '') + '/'; }
+function loginCookie(config, value) {
+  return `${COOKIE}=${value}; Path=${cookiePath(config)}; Max-Age=${COOKIE_MAX_AGE}; HttpOnly; Secure; SameSite=Strict`;
+}
+function logoutCookie(config) {
+  return `${COOKIE}=; Path=${cookiePath(config)}; Max-Age=0; HttpOnly; Secure; SameSite=Strict`;
+}
+function readCookie(header) {
+  for (const part of String(header || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i !== -1 && part.slice(0, i).trim() === COOKIE) return decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return '';
+}
+const withCookie = (res, cookie) => ({ ...res, cookies: [...(res.cookies || []), cookie] });
+
 const READ_ONLY = { error: '보기 전용입니다. 초대 코드를 받아 입력하면 쓸 수 있습니다.' };
 const OWNER_ONLY = { error: '주인만 할 수 있습니다.' };
 
@@ -62,12 +83,29 @@ function parseBody(req) {
   try { return JSON.parse(req.body); } catch { throw new service.InputError('본문이 JSON이 아닙니다.'); }
 }
 
-/** 요청한 사람을 찾는다. user 가 null 이면 열쇠가 틀린 것이다. */
+/**
+ * 요청한 사람을 찾는다. user 가 null 이면 열쇠가 틀린 것이다.
+ * via: 'bearer' | 'cookie' | 'none'. token: 쿠키로 내려 줄(또는 이미 쿠키에 든) 열쇠 값.
+ */
 async function authenticate(req, deps, path) {
   const { store, config } = deps;
-  if (path.startsWith('/mcp/')) return { user: await users.resolveMcp(store, config, decodeURIComponent(path.slice(5))) };
-  if (path.startsWith('/api/')) return { user: await users.resolveApp(store, config, req.headers.authorization) };
-  return { user: users.GUEST };
+  if (path.startsWith('/mcp/')) return { user: await users.resolveMcp(store, config, decodeURIComponent(path.slice(5))), via: 'none' };
+  if (!path.startsWith('/api/')) return { user: users.GUEST, via: 'none' };
+  if (req.headers.authorization) {
+    const user = await users.resolveApp(store, config, req.headers.authorization);
+    const token = String(req.headers.authorization).replace(/^Bearer\s+/, '').trim();
+    return { user, via: 'bearer', token };
+  }
+  const token = readCookie(req.headers.cookie);
+  if (token) return { user: await users.resolveApp(store, config, 'Bearer ' + token), via: 'cookie', token };
+  return { user: users.GUEST, via: 'none' };
+}
+
+/** 쿠키로 인증한 쓰기 요청이 다른 사이트에서 왔으면 막는다. SameSite=Strict 에 더하는 한 겹이다. */
+function crossSite(req) {
+  const origin = req.headers.origin;
+  if (!origin) return false;
+  try { return new URL(origin).host !== req.headers.host; } catch { return true; }
 }
 
 /**
@@ -101,11 +139,12 @@ export async function route(req, deps) {
     who: auth.user && auth.user.uid ? auth.user.name : undefined,
     path: kind === 'other' ? path.slice(0, 100) : undefined, // MCP 경로에는 키가 들어 있으므로 남기지 않는다
   }).catch((e) => console.warn('traffic record failed', e.name || e));
-  const [res] = await Promise.all([handle(req, deps, method, path, auth.user), recording]);
+  const [res] = await Promise.all([handle(req, deps, method, path, auth), recording]);
   return res;
 }
 
-async function handle(req, deps, method, path, user) {
+async function handle(req, deps, method, path, auth) {
+  const user = auth.user;
   const { store, config, assets } = deps;
   const now = deps.now ? deps.now() : Date.now();
   try {
@@ -138,15 +177,27 @@ async function handle(req, deps, method, path, user) {
 
     // ---- 앱 API ----
     if (path.startsWith('/api/')) {
-      // 초대 코드는 열쇠가 없는(또는 끊긴) 기기에서 쓰므로 열쇠 검사보다 먼저 받는다
+      // 로그아웃과 초대 코드는 열쇠가 없거나 끊긴 기기에서도 쓰므로 열쇠 검사보다 먼저 받는다
+      if (path === '/api/logout' && method === 'POST') return withCookie(empty(204), logoutCookie(config));
       if (path === '/api/invites/redeem' && method === 'POST') {
         const r = await users.redeemInvite(store, (parseBody(req) || {}).code, now);
-        return r ? json(200, { token: r.token, me: r.user }) : json(400, { error: '초대 코드가 맞지 않거나, 이미 썼거나, 기한(24시간)이 지났습니다.' });
+        return r ? withCookie(json(200, { me: r.user }), loginCookie(config, r.token))
+          : json(400, { error: '초대 코드가 맞지 않거나, 이미 썼거나, 기한(24시간)이 지났습니다.' });
       }
       if (!user || (user.role === 'guest' && !config.publicRead)) return json(401, { error: '접속 키가 없거나 올바르지 않습니다.' });
+      if (auth.via === 'cookie' && method !== 'GET' && method !== 'HEAD' && crossSite(req)) return json(403, { error: '다른 사이트에서 온 요청입니다.' });
+
+      // 로그인 쿠키 받기: Bearer 로 확인된 열쇠를 쿠키로 바꿔 준다. 쿠키로 부르면 기한만 다시 늘린다
+      if (path === '/api/session' && method === 'POST') {
+        if (user.role === 'guest') return json(401, { error: '접속 키가 없거나 올바르지 않습니다.' });
+        return withCookie(json(200, { role: user.role, name: user.name, uid: user.uid }), loginCookie(config, auth.token));
+      }
 
       // 누구나. 손님은 주인의 화면을 읽기만 한다
-      if (path === '/api/me' && method === 'GET') return json(200, { role: user.role, name: user.name, uid: user.uid });
+      if (path === '/api/me' && method === 'GET') {
+        const me = json(200, { role: user.role, name: user.name, uid: user.uid });
+        return auth.via === 'cookie' ? withCookie(me, loginCookie(config, auth.token)) : me; // 쓸 때마다 400일을 다시 센다
+      }
       if (path === '/api/state' && method === 'GET') {
         const guest = user.role === 'guest';
         return json(200, { ...(await service.getState(store, guest ? users.OWNER : user)), readOnly: guest });

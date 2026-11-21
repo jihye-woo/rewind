@@ -78,21 +78,32 @@ import EXAMPLE from './example.json';
   function reindex() { S.byId = {}; S.items.forEach(function (i) { S.byId[i.id] = i; }); }
 
   /* ---------- 서버와 주고받기 ---------- */
+  /**
+   * 로그인은 서버가 내려 주는 HttpOnly 쿠키로 유지한다. 화면의 JS 는 키를 들고 있지 않는다.
+   * 키를 받는 곳은 두 군데: 주소 끝의 #key=... (배포 때 받은 app_url), 예전 버전이 브라우저 저장소에 넣어 둔 키.
+   * 받은 키는 POST api/session 으로 한 번 보내 쿠키로 바꾸고, 주소와 저장소에서는 지운다.
+   */
   function readKey() {
-    // 처음 열 때는 주소 끝의 #key=... 에서 접속 키를 받아 이 브라우저에 저장하고, 주소에서는 지운다
     var m = (location.hash || '').match(/key=([^&]+)/);
     if (m) {
-      try { localStorage.setItem(KEY_LS, decodeURIComponent(m[1])); } catch (e) { /* 저장 불가: 이번 방문에만 쓴다 */ }
       S.key = decodeURIComponent(m[1]);
       history.replaceState(null, '', location.pathname + '#study');
       return;
     }
     try { S.key = localStorage.getItem(KEY_LS) || ''; } catch (e) { S.key = ''; }
   }
-  async function api(method, path, body) {
+  function forgetStoredKey() { try { localStorage.removeItem(KEY_LS); } catch (e) { /* 무시 */ } }
+  /** 키를 쿠키로 바꾼다. 성공하면 키를 잊는다. */
+  async function login(key) {
+    try { await api('POST', 'api/session', undefined, key); }
+    finally { S.key = ''; }
+    forgetStoredKey();
+  }
+  async function api(method, path, body, bearer) {
     var res = await fetch(path, {
       method: method,
-      headers: Object.assign(S.key ? { authorization: 'Bearer ' + S.key } : {}, body === undefined ? {} : { 'content-type': 'application/json' }),
+      credentials: 'same-origin',
+      headers: Object.assign(bearer ? { authorization: 'Bearer ' + bearer } : {}, body === undefined ? {} : { 'content-type': 'application/json' }),
       body: body === undefined ? undefined : JSON.stringify(body)
     });
     if (res.status === 401) { var e = new Error('unauthorized'); e.code = 401; throw e; }
@@ -159,7 +170,7 @@ import EXAMPLE from './example.json';
       S.items = d.items || []; S.sessions = d.sessions || []; reindex();
       S.ro = !!d.readOnly; S.mode = 'ready'; S.note = '';
     } catch (e) {
-      if (e.code === 401) { S.mode = 'nokey'; if (S.key) S.flash = '저장된 열쇠가 더 이상 맞지 않습니다. 새 초대 코드를 넣거나 읽기 전용으로 보세요.'; }
+      if (e.code === 401) { S.mode = 'nokey'; S.flash = '로그인이 끊겼거나 이 서버는 읽기 전용 보기를 허용하지 않습니다. 초대 코드나 키를 넣어 주세요.'; }
       else { S.mode = S.mode === 'ready' ? 'ready' : 'error'; S.note = '서버에서 데이터를 불러오지 못했습니다. 연결을 확인한 뒤 다시 시도하세요.'; }
     }
     render();
@@ -174,11 +185,11 @@ import EXAMPLE from './example.json';
     var bp = new URL(document.baseURI).pathname;
     if (location.pathname + '/' === bp) history.replaceState(null, '', bp + location.search + location.hash);
     readKey(); route(); render();
-    load(); // 열쇠가 없으면 손님(보기 전용)으로 연다
-  }
-  function saveKey(v) {
-    S.key = v;
-    try { if (v) localStorage.setItem(KEY_LS, v); else localStorage.removeItem(KEY_LS); } catch (e) { /* 이번 방문에만 쓴다 */ }
+    if (!S.key) { load(); return; } // 쿠키가 있으면 그 사람으로, 없으면 손님(읽기 전용)으로 연다
+    login(S.key).then(load, function (e) {
+      if (e.code === 401) { forgetStoredKey(); S.mode = 'nokey'; S.flash = '키가 맞지 않습니다. 키가 바뀌었다면 새 키를 넣거나 초대 코드를 받아 주세요.'; render(); }
+      else load(); // 연결 문제: 쿠키가 이미 있을 수 있으니 그대로 읽어 본다. 저장소의 키는 다음에 다시 바꾼다
+    });
   }
 
   /* ---------- pieces ---------- */
@@ -230,7 +241,8 @@ import EXAMPLE from './example.json';
     if (s.idx >= s.cards.length) { finish(); return; }
     var c = s.cards[s.idx], it = S.byId[c.id];
     if (c.type === 'quiz') s.cur = C.resolveQuiz(it, S.items, Math.random, c.prefer);
-    else s.cur = { type: c.type, ex: C.pickExample(it, (it.st && it.st.seen) || 0) };
+    // 객관식 보기를 만들 재료가 없으면 그 차례는 보고 익히기로 보여 준다
+    if (c.type !== 'quiz' || !s.cur) s.cur = { type: c.type === 'intro' ? 'intro' : 'expose', ex: C.pickExample(it, (it.st && it.st.seen) || 0) };
     s.phase = 'front'; s.answered = null;
   }
   function persistSession() {
@@ -312,15 +324,8 @@ import EXAMPLE from './example.json';
         h += (q.ex && q.ex.ko ? '<div class="ko">' + esc(q.ex.ko) + '</div>' : '') + '<hr><div class="target" style="font-size:20px">' + esc(it.text) + '</div>' + detailHtml(it, null);
       }
       h += '</div>';
-      h += back ? '<div class="row2"><button class="btn" data-act="seen" data-v="new">아직 낯설어요</button><button class="btn primary" data-act="seen" data-v="ok" data-primary>익숙해요</button></div>'
+      h += back ? '<button class="btn primary" data-act="seen" data-primary>다음</button>'
         : '<button class="btn primary" data-act="flip" data-primary>뜻 보기</button>';
-    } else if (q.type === 'recall') {
-      h += '<div class="card"><div class="kind">떠올리기 · ' + k + '</div><div class="meaning">' + esc(it.meaning_ko) + '</div>' +
-        (q.ex && q.ex.ko ? '<div class="ko">예: ' + esc(q.ex.ko) + '</div>' : '') +
-        (back ? '<hr><div class="target">' + esc(it.text) + '</div>' + (q.ex ? '<div class="en">' + lineHtml(q.ex.en) + '</div>' : '') + (it.note ? '<div class="note">' + esc(it.note) + '</div>' : '') + relsHtml(it)
-          : '<div class="q">영어로 떠올려 본 뒤 정답을 확인하세요.</div>') + '</div>';
-      h += back ? '<div class="row2"><button class="btn" data-act="self" data-r="0">못 떠올렸어요</button><button class="btn primary" data-act="self" data-r="1" data-primary>떠올렸어요</button></div>'
-        : '<button class="btn primary" data-act="flip" data-primary>정답 보기</button>';
     } else {
       var title = { meaning: '뜻 고르기', cloze: '빈칸 채우기', synonym: q.rel === 'ant' ? '반의어 고르기' : '유의어 고르기' }[q.type];
       h += '<div class="card"><div class="kind">' + title + ' · ' + k + (c.retry ? ' · 다시 풀기' : '') + '</div>';
@@ -615,15 +620,15 @@ import EXAMPLE from './example.json';
     start: function () { startSession(); },
     'key-open': function () { S.flash = ''; S.mode = 'nokey'; render(); var el = $('#key-input'); if (el) el.focus(); },
     'key-cancel': function () {
-      // 저장된 키를 지우고 키 없이 다시 읽는다. 서버가 읽기 전용을 막아 두었으면 다시 이 화면으로 온다.
-      S.key = ''; try { localStorage.removeItem(KEY_LS); } catch (e) { /* 무시 */ }
+      // 로그인 쿠키를 지우고 키 없이 다시 읽는다. 서버가 읽기 전용을 막아 두었으면 다시 이 화면으로 온다.
+      S.key = ''; forgetStoredKey();
       S.mode = 'loading'; render();
-      load().then(function () { if (S.mode === 'nokey') { S.flash = '이 서버는 읽기 전용 보기를 허용하지 않습니다.'; render(); } });
+      api('POST', 'api/logout').catch(function () { /* 연결 문제여도 다시 읽어 본다 */ }).then(load)
+        .then(function () { if (S.mode === 'nokey') { S.flash = '이 서버는 읽기 전용 보기를 허용하지 않습니다.'; render(); } });
     },
     flip: function () { S.sess.phase = 'back'; render(); },
     'intro-next': function () { record('intro'); advance(); },
-    seen: function (el) { var v = el.getAttribute('data-v'); record(v === 'ok' ? 'seen_ok' : 'seen_new', { v: v }); advance(); },
-    self: function (el) { var r = +el.getAttribute('data-r'); record(r ? 'right' : 'wrong', { r: r }); advance(); },
+    seen: function () { record('seen'); advance(); }, // 아는지 묻지 않는다. 본 것만 기록한다
     answer: function (el) {
       var s = S.sess; if (s.answered != null) return;
       var i = +el.getAttribute('data-i'); s.answered = i;
@@ -654,15 +659,13 @@ import EXAMPLE from './example.json';
       if (!v) { S.flash = '초대 코드나 키를 입력하세요.'; render(); return; }
       var code = v.toUpperCase().replace(/[^A-Z0-9]/g, '');
       S.flash = ''; S.mode = 'loading'; render();
-      var fail = function (msg) { saveKey(''); S.mode = 'nokey'; S.flash = msg; render(); };
-      if (code.length === 8 && v.length <= 12) { // 초대 코드
-        saveKey('');
-        api('POST', 'api/invites/redeem', { code: code }).then(function (r) { saveKey(r.token); S.flash = ''; load(); },
+      var fail = function (msg) { S.mode = 'nokey'; S.flash = msg; render(); };
+      if (code.length === 8 && v.length <= 12) { // 초대 코드: 서버가 바로 로그인 쿠키를 내려 준다
+        api('POST', 'api/invites/redeem', { code: code }).then(function () { S.flash = ''; load(); },
           function (e) { fail(e.code ? e.message : '서버에 연결하지 못했습니다.'); });
         return;
       }
-      saveKey(v);
-      api('GET', 'api/me').then(function () { S.flash = ''; load(); },
+      login(v).then(function () { S.flash = ''; load(); },
         function (e) { fail(e.code === 401 ? '키가 맞지 않습니다.' : '서버에 연결하지 못했습니다.'); });
     },
     backup: function (el) {

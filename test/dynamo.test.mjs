@@ -81,6 +81,11 @@ test('배포될 Lambda 묶음: API Gateway 이벤트로 화면·API·MCP 가 동
   assert.equal(under.statusCode, 200); assert.match(under.body, /<base href="\/english\/">/);
   assert.equal(JSON.parse((await handler(ev('GET', '/english/api/me'))).body).role, 'guest');
   assert.equal((await handler(ev('GET', '/english/icon-192.png'))).statusCode, 200);
+  // 로그인 쿠키: API Gateway 는 쿠키를 event.cookies 로 주고, 응답의 cookies 배열로 받는다
+  const session = await handler(ev('POST', '/english/api/session', { headers: { authorization: 'Bearer app-key-xyz' } }));
+  assert.equal(session.statusCode, 200); assert.match(session.cookies[0], /^rewind_key=app-key-xyz; Path=\/english\/;/);
+  const viaCookie = await handler({ ...ev('GET', '/english/api/me'), cookies: ['a=b', 'rewind_key=app-key-xyz'] });
+  assert.equal(JSON.parse(viaCookie.body).role, 'owner');
   assert.equal((await handler(ev('GET', '/api/state', { headers: { authorization: 'Bearer wrong' } }))).statusCode, 401);
 
   const rpc = async (msg) => handler(ev('POST', '/mcp/mcp-key-xyz', { body: msg, headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' } }));

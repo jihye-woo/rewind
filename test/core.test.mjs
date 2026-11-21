@@ -61,12 +61,16 @@ test('세션: 30일 시뮬레이션에서 카드 순서와 퀴즈 보기가 규�
       if (k) assert.notEqual(c.id, s.cards[k - 1].id, `d${d}: 같은 항목이 연달아 나옴`);
       const it = byId[c.id]; let kind; const e = { i: c.id };
       if (c.type === 'intro') { kind = 'intro'; e.t = 'intro'; introduced.add(c.id); }
-      else if (c.type === 'expose') { kind = 'seen_ok'; e.t = 'expose'; }
+      else if (c.type === 'expose') { kind = 'seen'; e.t = 'expose'; }
       else {
         if (s.newIds.includes(c.id)) assert.ok(introduced.has(c.id), '소개보다 퀴즈가 먼저 나옴');
         const q = C.resolveQuiz(it, items, rnd, c.prefer);
-        if (q.options) { assert.equal(q.options.length, 4); assert.equal(q.options.filter((o) => o.ok).length, 1); assert.equal(new Set(q.options.map((o) => o.label.toLowerCase())).size, 4); }
-        const ok = rnd() < 0.85; kind = ok ? 'right' : 'wrong'; e.t = q.type; e.r = ok ? 1 : 0;
+        if (!q) { kind = 'seen'; e.t = 'expose'; } // 보기를 만들 수 없으면 보고 익히기로
+        else {
+          assert.ok(['meaning', 'cloze', 'synonym'].includes(q.type), '스스로 채점하는 퀴즈는 내지 않는다: ' + q.type);
+          assert.equal(q.options.length, 4); assert.equal(q.options.filter((o) => o.ok).length, 1); assert.equal(new Set(q.options.map((o) => o.label.toLowerCase())).size, 4);
+          const ok = rnd() < 0.85; kind = ok ? 'right' : 'wrong'; e.t = q.type; e.r = ok ? 1 : 0;
+        }
       }
       it.st = C.applyResult(it.st, kind, now + ev.length * 20000); ev.push(e);
     });
@@ -102,4 +106,20 @@ test('끈 항목은 세션과 통계에서 빠진다', () => {
   for (let k = 1; k <= 100; k++) C.buildSession(items, [], t0, rng(k)).cards.forEach((c) => assert.ok(!items.find((i) => i.id === c.id).off));
   const st = C.computeStats(items, [], t0);
   assert.equal(st.by.off, 5); assert.equal(st.by.off + st.by.queued + st.by.learning + st.by.familiar, 10);
+});
+
+test('아는지 묻지 않는다: 보고 익히기는 반감기를 바꾸지 않고, 퀴즈는 객관식만', () => {
+  const now = 1794717000000;
+  const st = C.applyResult(C.applyResult(null, 'intro', now), 'right', now + 2 * DAY);
+  const seen = C.applyResult(st, 'seen', now + 5 * DAY);
+  assert.equal(seen.h, st.h, '보고 익히기는 반감기를 그대로 둔다');
+  assert.equal(seen.seen, st.seen + 1); assert.equal(seen.sq, st.sq + 1); assert.equal(seen.right, st.right);
+  // 보기를 만들 재료가 없으면 null, 예전 기록의 prefer: 'recall' 도 객관식으로 바꾼다
+  const lone = { id: 'x', kind: 'word', text: 'x', meaning_ko: '엑스', examples: [], st: { h: 20 } };
+  assert.equal(C.resolveQuiz(lone, [lone], () => 0.1), null);
+  const rich = { ...lone, wrong_meanings_ko: ['가', '나', '다'] };
+  for (const h of [0.5, 5, 50]) {
+    const q = C.resolveQuiz({ ...rich, st: { h } }, [rich], () => 0.1, h === 50 ? 'recall' : undefined);
+    assert.equal(q.type, 'meaning');
+  }
 });

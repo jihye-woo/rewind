@@ -26,9 +26,10 @@ export async function handler(event) {
   const res = await route({
     method: event.requestContext?.http?.method || 'GET',
     path,
-    headers: event.headers || {}, // HTTP API는 헤더 이름을 소문자로 준다
+    // HTTP API는 헤더 이름을 소문자로 주고, 쿠키는 headers 가 아니라 event.cookies 배열로 준다
+    headers: { ...(event.headers || {}), ...(event.cookies && event.cookies.length ? { cookie: event.cookies.join('; ') } : {}) },
     body,
     ip: event.requestContext?.http?.sourceIp,
   }, { store, traffic, config, assets });
-  return { statusCode: res.status, headers: res.headers, body: res.body || '', isBase64Encoded: !!res.base64 };
+  return { statusCode: res.status, headers: res.headers, ...(res.cookies ? { cookies: res.cookies } : {}), body: res.body || '', isBase64Encoded: !!res.base64 };
 }

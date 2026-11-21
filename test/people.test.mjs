@@ -8,9 +8,11 @@ import { assets } from '../dist/web-assets.mjs';
 const config = { appKey: 'app-key-123', mcpKey: 'mcp-key-456', publicRead: true, basePath: '/english' };
 let clock = 1794717000000;
 const mkDeps = () => ({ store: createMemoryStore(), config, assets, now: () => clock });
-const req = (deps, method, path, { key, body } = {}) => route({
-  method, path, headers: key ? { authorization: 'Bearer ' + key } : {}, body: body === undefined ? undefined : JSON.stringify(body),
+const req = (deps, method, path, { key, body, headers = {} } = {}) => route({
+  method, path, headers: { ...(key ? { authorization: 'Bearer ' + key } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body),
 }, deps).then((r) => ({ status: r.status, body: r.body ? JSON.parse(r.body) : null, raw: r }));
+/** Set-Cookie 에서 로그인 쿠키 값만 꺼낸다 */
+const cookieOf = (r) => { const c = (r.raw.cookies || []).find((x) => x.startsWith('rewind_key=')); return c ? c.split(';')[0].slice('rewind_key='.length) : null; };
 const OWNER_KEY = config.appKey;
 const word = { picked_by: 'user', items: [{ text: 'on the house', meaning_ko: '무료로', examples: [{ en: 'Drinks are [on the house].' }] }] };
 const st = { h: 1, last: 5, intro: 5, seen: 1, right: 0, wrong: 0, recent: '', sq: 1 };
@@ -20,7 +22,8 @@ async function invite(deps, name) {
   assert.equal(inv.status, 200); assert.match(inv.body.code, /^[A-Z2-9]{8}$/);
   const r = await req(deps, 'POST', '/api/invites/redeem', { body: { code: inv.body.code } });
   assert.equal(r.status, 200);
-  return r.body;
+  assert.equal(r.body.token, undefined, '열쇠는 본문이 아니라 HttpOnly 쿠키로만 준다');
+  return { ...r.body, token: cookieOf(r) };
 }
 
 test('화면은 서비스 경로를 base 로 쓴다', async () => {
@@ -82,8 +85,9 @@ test('친구는 같은 단어장을 쓰고 진도는 따로 쌓는다', async ()
   assert.equal((await req(deps, 'POST', '/api/import', { key: f.token, body: { items: [] } })).status, 403);
   // 친구의 새 기기: 같은 진도를 이어 쓴다
   const self = await req(deps, 'POST', '/api/invites', { key: f.token, body: { self: true } });
-  const dev2 = (await req(deps, 'POST', '/api/invites/redeem', { body: { code: self.body.code } })).body;
-  assert.equal(dev2.me.uid, f.me.uid);
+  const r2 = await req(deps, 'POST', '/api/invites/redeem', { body: { code: self.body.code } });
+  const dev2 = { ...r2.body, token: cookieOf(r2) };
+  assert.equal(dev2.me.uid, f.me.uid); assert.notEqual(dev2.token, f.token, '기기마다 열쇠가 다르다');
   assert.equal((await req(deps, 'GET', '/api/state', { key: dev2.token })).body.items.find((i) => i.id === 'on-the-house').off, true);
 });
 
@@ -120,4 +124,29 @@ test('접속 끊기: 그 사람의 열쇠와 MCP 주소가 막히고 기록은 �
   const call = (p) => route({ method: 'POST', path: '/' + p, headers: {}, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }) }, deps);
   assert.equal((await call(k1)).status, 404); assert.equal((await call(k2)).status, 200);
   assert.equal((await call('mcp/' + config.mcpKey)).status, 200, '배포 때 만든 MCP 키는 그대로');
+});
+
+test('로그인 쿠키: 키를 쿠키로 바꾸고, 쿠키로 접속하고, 로그아웃한다', async () => {
+  const deps = mkDeps();
+  const login = await req(deps, 'POST', '/api/session', { key: OWNER_KEY });
+  assert.equal(login.status, 200); assert.equal(login.body.role, 'owner');
+  const set = login.raw.cookies.find((c) => c.startsWith('rewind_key='));
+  for (const attr of ['HttpOnly', 'Secure', 'SameSite=Strict', 'Path=/english/', 'Max-Age=' + 400 * 86400]) assert.ok(set.includes(attr), attr);
+  const cookie = 'other=1; rewind_key=' + cookieOf(login);
+  const host = 'orangedogg.com';
+  // 쿠키만으로 주인이다. /api/me 를 부를 때마다 기한을 다시 늘린다
+  const me = await req(deps, 'GET', '/api/me', { headers: { cookie, host } });
+  assert.equal(me.body.role, 'owner'); assert.ok(cookieOf(me));
+  assert.equal((await req(deps, 'POST', '/api/add-items', { body: word, headers: { cookie, host, origin: 'https://orangedogg.com' } })).status, 200);
+  assert.equal((await req(deps, 'POST', '/api/add-items', { body: word, headers: { cookie, host, origin: 'https://evil.example' } })).status, 403, '다른 사이트에서 온 쓰기');
+  assert.equal((await req(deps, 'GET', '/api/state', { headers: { cookie: 'rewind_key=wrong' } })).status, 401, '틀린 쿠키');
+  assert.equal((await req(deps, 'GET', '/api/state', { key: 'wrong', headers: { cookie } })).status, 401, 'Bearer 가 있으면 그것을 본다');
+  assert.equal((await req(deps, 'POST', '/api/session')).status, 401, '손님은 쿠키를 못 받는다');
+  assert.equal((await req(deps, 'POST', '/api/session', { key: config.mcpKey })).status, 401, 'MCP 키로는 못 받는다');
+  const out = await req(deps, 'POST', '/api/logout', { headers: { cookie: 'rewind_key=wrong' } });
+  assert.equal(out.status, 204); assert.ok(out.raw.cookies[0].includes('Max-Age=0'));
+  // 끊긴 친구의 쿠키는 401
+  const f = await invite(deps, '민수');
+  await req(deps, 'DELETE', '/api/users/' + f.me.uid, { key: OWNER_KEY });
+  assert.equal((await req(deps, 'GET', '/api/me', { headers: { cookie: 'rewind_key=' + f.token } })).status, 401);
 });

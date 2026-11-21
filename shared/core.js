@@ -152,7 +152,12 @@ function recallP(st, now) {
 function stage(it) { return !learned(it) ? 'queued' : (it.st.h >= CFG.familiarH ? 'familiar' : 'learning'); }
 function nextDue(st) { return (!st || st.h == null) ? null : st.last + st.h * Math.log2(1 / CFG.dueP) * DAY; }
 
-/** kind: intro | seen_ok | seen_new | right | wrong | retry_right | retry_wrong */
+/**
+ * kind: intro | seen | right | wrong (retry 는 다시 풀기: 횟수만 센다)
+ * seen 은 보고 익히기. 학습자에게 아는지 묻지 않으므로 반감기는 바꾸지 않고 본 횟수만 센다.
+ * 반감기는 정답이 정해진 퀴즈(right / wrong)로만 바뀐다.
+ * seen_ok / seen_new 는 예전 기록을 읽기 위해 남겨 둔다 (2026-11-20 전의 "익숙해요 / 낯설어요").
+ */
 function applyResult(st, kind, now) {
   var s = { h: null, last: null, intro: null, seen: 0, right: 0, wrong: 0, recent: '', sq: 0 };
   if (st) for (var k in s) if (st[k] != null) s[k] = st[k];
@@ -171,7 +176,7 @@ function applyResult(st, kind, now) {
     if (kind === 'right') s.right += 1; else s.wrong += 1;
     s.recent = (s.recent + (kind === 'right' ? '1' : '0')).slice(-5);
     s.sq = 0;
-  } else if (kind === 'seen_ok' || kind === 'seen_new' || kind === 'intro') s.sq += 1;
+  } else if (kind === 'seen' || kind === 'seen_ok' || kind === 'seen_new' || kind === 'intro') s.sq += 1;
   s.last = now;
   return s;
 }
@@ -217,20 +222,23 @@ function buildQuiz(it, type, items, rnd) {
     var o3 = pack(correct, pool2);
     return o3 && { type: type, rel: askAnt ? 'ant' : 'syn', options: o3 };
   }
-  if (type === 'recall') return { type: type, ex: pickExample(it, (it.st && it.st.seen) || 0) };
   return null;
 }
 
-/** 반감기에 따라 퀴즈 유형을 정하고, 만들 수 없으면 쉬운 유형으로 내려간다. */
+/**
+ * 반감기에 따라 퀴즈 유형을 정하고, 만들 수 없으면 쉬운 유형으로 내려간다.
+ * 정답이 정해진 객관식만 낸다(스스로 채점하는 '떠올리기'는 2026-11-20 에 뺐다).
+ * 보기를 만들 재료가 없으면 null. 화면은 그 차례를 보고 익히기로 보여 준다.
+ */
 function resolveQuiz(it, items, rnd, prefer) {
   rnd = rnd || Math.random;
   var h = (it.st && it.st.h) || 0, order;
-  if (prefer) order = [prefer, 'meaning', 'recall'];
-  else if (h < 3) order = ['meaning', 'recall'];
-  else if (h < 10) order = (it.kind === 'word' && rnd() < 0.5 ? ['synonym', 'cloze'] : ['cloze', 'synonym']).concat(['meaning', 'recall']);
-  else order = (rnd() < 0.5 ? ['recall', 'cloze'] : ['cloze', 'recall']).concat(['meaning']);
+  if (h < 3) order = ['meaning'];
+  else if (h < 10) order = (it.kind === 'word' && rnd() < 0.5 ? ['synonym', 'cloze'] : ['cloze', 'synonym']).concat(['meaning']);
+  else order = (rnd() < 0.5 ? ['cloze', 'synonym'] : ['synonym', 'cloze']).concat(['meaning']);
+  if (prefer && prefer !== 'recall') order = [prefer].concat(order.filter(function (t) { return t !== prefer; }));
   for (var i = 0; i < order.length; i++) { var q = buildQuiz(it, order[i], items, rnd); if (q) return q; }
-  return { type: 'recall', ex: null };
+  return null;
 }
 
 /** 표현은 노출 2번에 퀴즈 1번, 단어는 노출 1번에 퀴즈 1~2번. */

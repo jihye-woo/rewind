@@ -22,7 +22,7 @@ export async function startLocal({ port = 8787, store = createMemoryStore(), tra
       body: chunks.length ? Buffer.concat(chunks).toString('utf8') : undefined,
       ip: req.socket.remoteAddress,
     }, { store, traffic, config: { appKey, mcpKey, publicRead }, assets, now });
-    res.writeHead(out.status, out.headers);
+    res.writeHead(out.status, { ...out.headers, ...(out.cookies ? { 'set-cookie': out.cookies } : {}) });
     res.end(out.base64 ? Buffer.from(out.body, 'base64') : out.body);
   });
   await new Promise((ok) => server.listen(port, '127.0.0.1', ok));
